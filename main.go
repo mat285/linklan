@@ -43,14 +43,14 @@ func SetupDirectLan(ctx context.Context, node int) error {
 	if err := SetInterfaceDown(ctx, iface); err != nil {
 		return fmt.Errorf("failed to set interface down: %w", err)
 	}
+	if err := SetInterfaceUp(ctx, iface); err != nil {
+		return fmt.Errorf("failed to set interface up: %w", err)
+	}
 	if err := AssignSecondaryLanIp(ctx, iface, primaryIP); err != nil {
 		return fmt.Errorf("failed to assign lan ip: %w", err)
 	}
 	if err := AssignSecondaryLanCidrRoute(ctx, iface); err != nil {
 		return fmt.Errorf("failed to assign lan routes: %w", err)
-	}
-	if err := SetInterfaceUp(ctx, iface); err != nil {
-		return fmt.Errorf("failed to set interface up: %w", err)
 	}
 	return nil
 }
