@@ -154,19 +154,18 @@ func FindSecondaryNetworkInterface(ctx context.Context) ([]string, error) {
 	output := string(outputBytes)
 	fmt.Println("IP link output:", output)
 	ifaces := []string{}
-	idx := -1
-	for idx < len(output) {
-		idx = strings.Index(output, SecondaryInterfacePrefix)
-		if idx < 0 {
-			return nil, fmt.Errorf("no secondary interface found")
-		}
+	idx := strings.Index(output, SecondaryInterfacePrefix)
+	for idx > 0 && idx <= len(output) {
 		output = output[idx:]
 		end := strings.Index(output, ":")
 		if end < 0 {
-			return nil, fmt.Errorf("no end to secondary interface found")
+			break
 		}
 		iface := strings.TrimSpace(output[:end])
 		ifaces = append(ifaces, strings.TrimSpace(iface))
+	}
+	if len(ifaces) == 0 {
+		return nil, fmt.Errorf("no secondary network interfaces found")
 	}
 	fmt.Println("Found secondary network interfaces:", ifaces)
 	return ifaces, nil
