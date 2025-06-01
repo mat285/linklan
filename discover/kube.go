@@ -3,6 +3,7 @@ package discover
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 
 	"github.com/mat285/linklan/link"
@@ -16,6 +17,7 @@ type KubeAddress struct {
 func GetKubeNodeIPs(ctx context.Context) ([]string, error) {
 	output, err := exec.CommandContext(ctx, "kubectl", "get", "nodes", "-o", "jsonpath='{.items[*].status.addresses}'").CombinedOutput()
 	if err != nil {
+		fmt.Println(string(output))
 		return nil, err
 	}
 	var addresses []KubeAddress
