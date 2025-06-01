@@ -2,12 +2,15 @@ package discover
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
+	"strings"
 
 	"github.com/mat285/linklan/link"
 )
+
+var isIP = regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$`)
 
 type KubeAddress struct {
 	Address string `json:"address"`
@@ -16,23 +19,21 @@ type KubeAddress struct {
 
 func GetKubeNodeIPs(ctx context.Context) ([]string, error) {
 	fmt.Println("Fetching Kubernetes node IPs...")
-	output, err := exec.CommandContext(ctx, "kubectl", "get", "nodes", "-o", "jsonpath='{.items[*].status.addresses}'").CombinedOutput()
+	output, err := exec.CommandContext(ctx, "kubectl", "get", "nodes", "-o", "jsonpath='{.items[*].status.addresses[*].address}'").CombinedOutput()
 	if err != nil {
 		fmt.Println("Error executing kubectl command:", string(output))
 		return nil, err
 	}
-	output = output[1 : len(output)-1]
 	fmt.Println("Raw output from kubectl:", string(output))
-	var addresses []KubeAddress
-	err = json.Unmarshal(output, &addresses)
-	if err != nil {
-		return nil, err
-	}
+	addrs := strings.Split(string(output), " ")
 	var ips []string
-	for _, addr := range addresses {
-		if addr.Type == "InternalIP" {
-			ips = append(ips, addr.Address)
+	for _, addr := range addrs {
+		addr = strings.TrimSpace(addr)
+		if !isIP.MatchString(addr) {
+			fmt.Printf("Skipping non-IP address: %s\n", addr)
+			continue
 		}
+		ips = append(ips, addr)
 	}
 	return ips, nil
 }
