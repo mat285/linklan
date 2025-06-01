@@ -30,7 +30,7 @@ func (l *Logger) Info(msg string, msgs ...any) {
 	for _, m := range msgs {
 		strs = append(strs, fmt.Sprintf("%v", m))
 	}
-	l.Infof("%s%s", strings.Join(strs, " "))
+	l.Infof(strings.Join(strs, " "))
 }
 
 func (l *Logger) Infof(format string, args ...any) {
