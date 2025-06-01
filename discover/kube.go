@@ -24,13 +24,11 @@ func GetKubeNodeIPs(ctx context.Context) ([]string, error) {
 		fmt.Println("Error executing kubectl command:", string(output))
 		return nil, err
 	}
-	fmt.Println("Raw output from kubectl:", string(output))
 	addrs := strings.Split(string(output), " ")
 	var ips []string
 	for _, addr := range addrs {
 		addr = strings.TrimSpace(addr)
 		if !isIP.MatchString(addr) {
-			fmt.Printf("Skipping non-IP address: %s\n", addr)
 			continue
 		}
 		ips = append(ips, addr)
@@ -43,6 +41,7 @@ func GetActiveKubePeers(ctx context.Context, localIP string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("Checking for active peers from", ips)
 	filteredIPs := []string{}
 	for _, ip := range ips {
 		if ip == localIP {
@@ -53,5 +52,6 @@ func GetActiveKubePeers(ctx context.Context, localIP string) ([]string, error) {
 			filteredIPs = append(filteredIPs, ip)
 		}
 	}
+	fmt.Println("Active peers found:", filteredIPs)
 	return filteredIPs, nil
 }
