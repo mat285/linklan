@@ -44,11 +44,12 @@ func SetDirectRoutes(ctx context.Context, ifaces []string, peers []string) error
 		return fmt.Errorf("failed to find existing routes for interface %s: %w", iface, err)
 	}
 	existing = FilterDirectRoutes(existing)
+	existingSet := StringSet(existing)
 	toAdd := []string{}
 	toDelete := []string{}
 	for _, peer := range peers {
-		_, has := existing[peer]
-		delete(existing, peer)
+		_, has := existingSet[peer]
+		delete(existingSet, peer)
 		if has {
 			fmt.Printf("Route %s already exists for interface %s, skipping\n", peer, iface)
 			continue
@@ -57,7 +58,7 @@ func SetDirectRoutes(ctx context.Context, ifaces []string, peers []string) error
 		toAdd = append(toAdd, peer)
 	}
 
-	for route := range existing {
+	for route := range existingSet {
 		fmt.Printf("Route %s exists for interface %s, removing\n", route, iface)
 		toDelete = append(toDelete, route)
 	}
@@ -150,40 +151,46 @@ func FindSecondaryNetworkInterface(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	idx := strings.Index(string(output), SecondaryInterfacePrefix)
-	if idx < 0 {
-		return nil, fmt.Errorf("no secondary interface found")
+	ifaces := []string{}
+	idx := -1
+	for idx < len(output) {
+		idx = strings.Index(string(output), SecondaryInterfacePrefix)
+		if idx < 0 {
+			return nil, fmt.Errorf("no secondary interface found")
+		}
+		cut := string(output)[idx:]
+		idx = strings.Index(cut, ":")
+		if idx < 0 {
+			return nil, fmt.Errorf("no secondary interface found")
+		}
+		iface := strings.TrimSpace(cut[:idx])
+		output = output[idx+len(iface):]
+		ifaces = append(ifaces, strings.TrimSpace(iface))
 	}
-	cut := string(output)[idx:]
-	idx = strings.Index(cut, ":")
-	if idx < 0 {
-		return nil, fmt.Errorf("no secondary interface found")
-	}
-	ifaces := []string{cut[:idx]}
 	fmt.Println("Found secondary network interfaces:", ifaces)
 	return ifaces, nil
 }
 
-func FilterDirectRoutes(routes map[string]struct{}) map[string]struct{} {
-	filtered := map[string]struct{}{}
-	for route := range routes {
+func FilterDirectRoutes(routes []string) []string {
+	filtered := []string{}
+	for _, route := range routes {
 		route = strings.TrimSuffix(route, "/32")
 		if strings.Contains(route, "/") {
 			continue
 		}
-		filtered[route] = struct{}{}
+		filtered = append(filtered, route)
 	}
 	return filtered
 }
 
-func FindInterfaceRoutes(ctx context.Context, iface string) (map[string]struct{}, error) {
+func FindInterfaceRoutes(ctx context.Context, iface string) ([]string, error) {
 	fmt.Println("Finding routes for interface:", iface)
 	output, err := ExecIPCommand(ctx, "route", "show", "dev", iface)
 	if err != nil {
 		return nil, err
 	}
 	lines := strings.Split(string(output), "\n")
-	routes := map[string]struct{}{}
+	routes := []string{}
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -193,7 +200,7 @@ func FindInterfaceRoutes(ctx context.Context, iface string) (map[string]struct{}
 			continue
 		}
 		ip := strings.TrimSpace(parts[0])
-		routes[ip] = struct{}{}
+		routes = append(routes, ip)
 	}
 	fmt.Println("Found routes for interface", iface, ":", routes)
 	return routes, nil
@@ -222,7 +229,7 @@ func CheckSecondaryLanCidrRoute(ctx context.Context, interfaceName string) (bool
 	if err != nil {
 		return false, fmt.Errorf("failed to find routes for interface %s: %w", interfaceName, err)
 	}
-	_, exists := routes[SecondaryLanCidr]
+	_, exists := StringSet(routes)[SecondaryLanCidr]
 	return exists, nil
 }
 
@@ -277,4 +284,12 @@ func ExecIPCommand(ctx context.Context, args ...string) ([]byte, error) {
 func SecondaryIPFromPrimaryIP(primaryIP string) string {
 	secondaryIP := fmt.Sprintf("%s%s", SecondaryLanIpPrefix, strings.TrimPrefix(primaryIP, PrimaryLanIpPrefix))
 	return secondaryIP
+}
+
+func StringSet(s []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(s))
+	for _, v := range s {
+		set[v] = struct{}{}
+	}
+	return set
 }
