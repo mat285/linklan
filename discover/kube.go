@@ -15,9 +15,10 @@ type KubeAddress struct {
 }
 
 func GetKubeNodeIPs(ctx context.Context) ([]string, error) {
+	fmt.Println("Fetching Kubernetes node IPs...")
 	output, err := exec.CommandContext(ctx, "kubectl", "get", "nodes", "-o", "jsonpath='{.items[*].status.addresses}'").CombinedOutput()
+	fmt.Println("Command output:", string(output))
 	if err != nil {
-		fmt.Println(string(output))
 		return nil, err
 	}
 	var addresses []KubeAddress
