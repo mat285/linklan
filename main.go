@@ -36,10 +36,11 @@ func SetDirectRoutes(ctx context.Context, iface string, peers []string) error {
 		return fmt.Errorf("failed to find secondary network interface: %w", err)
 	}
 	iface = ifaces[0]
-	existing, err := FindInterfaceSingleRoutes(ctx, iface)
+	existing, err := FindInterfaceRoutes(ctx, iface)
 	if err != nil {
 		return fmt.Errorf("failed to find existing routes for interface %s: %w", iface, err)
 	}
+	existing = FilterDirectRoutes(existing)
 	toAdd := []string{}
 	toDelete := []string{}
 	for _, peer := range peers {
@@ -167,7 +168,19 @@ func FindSecondaryNetworkInterface(ctx context.Context) ([]string, error) {
 	return ifaces, nil
 }
 
-func FindInterfaceSingleRoutes(ctx context.Context, iface string) (map[string]struct{}, error) {
+func FilterDirectRoutes(routes map[string]struct{}) map[string]struct{} {
+	filtered := map[string]struct{}{}
+	for route := range routes {
+		route = strings.TrimSuffix(route,"/32")
+		if strings.Contains(route,"/") {
+			continue
+		}
+		filtered[route] = struct{}{}
+	}
+	return filtered
+}
+
+func FindInterfaceRoutes(ctx context.Context, iface string) (map[string]struct{}, error) {
 	fmt.Println("Finding single routes for interface:", iface)
 	output, err := exec.CommandContext(ctx,
 		"ip",
@@ -179,10 +192,15 @@ func FindInterfaceSingleRoutes(ctx context.Context, iface string) (map[string]st
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println(string(output))
 	lines := strings.Split(string(output), "\n")
 	routes := map[string]struct{}{}
 	for _, line := range lines {
+		fmt.Println("route entry",line)
 		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if !strings.Contains(line,iface) {
 			continue
 		}
 		parts := strings.Split(line, " ")
@@ -190,10 +208,6 @@ func FindInterfaceSingleRoutes(ctx context.Context, iface string) (map[string]st
 			continue
 		}
 		ip := strings.TrimSpace(parts[0])
-		if strings.Contains(ip, "/") && !strings.HasSuffix(ip, "/32") {
-			continue
-		}
-		ip = strings.TrimSuffix(ip, "/32")
 		routes[ip] = struct{}{}
 	}
 	fmt.Println("Found routes for interface", iface, ":", routes)
