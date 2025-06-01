@@ -89,7 +89,7 @@ func FindSecondaryNetworkIP(ctx context.Context, iface string) (string, error) {
 		return "", err
 	}
 	str := string(output)
-	idx := strings.Index(str, SecondaryInterfacePrefixs)
+	idx := strings.Index(str, SecondaryInterfacePrefix)
 	if idx < 0 {
 		return "", fmt.Errorf("no primary network IP found")
 	}
