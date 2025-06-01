@@ -20,7 +20,9 @@ type KubeAddress struct {
 
 func GetKubeNodeIPs(ctx context.Context) ([]string, error) {
 	fmt.Println("Fetching Kubernetes node IPs...")
-	output, err := exec.CommandContext(ctx, "kubectl", "get", "nodes", "-o", "jsonpath='{.items[*].status.addresses[*].address}'").CombinedOutput()
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "nodes", "-o", "jsonpath='{.items[*].status.addresses[*].address}'")
+	cmd.Env = append(cmd.Env, "KUBECONFIG=/home/michael/.kube/config")
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		fmt.Println("Error executing kubectl command:", string(output))
 		return nil, err

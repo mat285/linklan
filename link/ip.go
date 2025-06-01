@@ -272,8 +272,9 @@ func SetInterfaceUp(ctx context.Context, interfaceName string) error {
 func ExecIPCommand(ctx context.Context, args ...string) ([]byte, error) {
 	// fmt.Println("Executing IP command:", args)
 	cmd := exec.CommandContext(ctx,
-		"sudo",
-		append([]string{"ip"}, args...)...,
+		"ip",
+		args...,
+	// append([]string{"ip"}, args...)...,
 	)
 	// cmd.Stdout = os.Stdout
 	// cmd.Stderr = os.Stderr
