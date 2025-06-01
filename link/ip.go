@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/mat285/linklan/log"
 )
 
 const (
@@ -28,12 +30,12 @@ func EnsureDirectLan(ctx context.Context, peers []string) error {
 		return fmt.Errorf("failed to setup direct interfaces: %w", err)
 	}
 	if len(peers) != 0 {
-		fmt.Println("Setting up direct routes for peers:", peers)
+		log.Default().Info("Setting up direct routes for peers:", peers)
 		if err := SetDirectRoutes(ctx, ifaces, peers); err != nil {
 			return fmt.Errorf("failed to set direct routes: %w", err)
 		}
 	}
-	fmt.Println("Direct LAN setup completed successfully")
+	log.Default().Info("Direct LAN setup completed successfully")
 	return nil
 }
 
@@ -51,15 +53,15 @@ func SetDirectRoutes(ctx context.Context, ifaces []string, peers []string) error
 		_, has := existingSet[peer]
 		delete(existingSet, peer)
 		if has {
-			fmt.Printf("Route %s already exists for interface %s, skipping\n", peer, iface)
+			log.Default().Infof("Route %s already exists for interface %s, skipping\n", peer, iface)
 			continue
 		}
-		fmt.Printf("Route %s does not exist for interface %s, adding\n", peer, iface)
+		log.Default().Infof("Route %s does not exist for interface %s, adding\n", peer, iface)
 		toAdd = append(toAdd, peer)
 	}
 
 	for route := range existingSet {
-		fmt.Printf("Route %s exists for interface %s, removing\n", route, iface)
+		log.Default().Infof("Route %s exists for interface %s, removing\n", route, iface)
 		toDelete = append(toDelete, route)
 	}
 
@@ -73,19 +75,19 @@ func SetDirectRoutes(ctx context.Context, ifaces []string, peers []string) error
 			return fmt.Errorf("failed to add route %s for interface %s: %w", route, iface, err)
 		}
 	}
-	fmt.Printf("Successfully updated routes for interface %s: added %d, removed %d\n", iface, len(toAdd), len(toDelete))
+	log.Default().Infof("Successfully updated routes for interface %s: added %d, removed %d\n", iface, len(toAdd), len(toDelete))
 	return nil
 }
 
 func SetupDirectInterfaces(ctx context.Context, ifaces []string) error {
 	iface := ifaces[0]
-	fmt.Println("Found secondary network interface:", iface)
+	log.Default().Info("Found secondary network interface:", iface)
 
 	primaryIP, err := FindPrimaryNetworkIP(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to find primary network IP: %w", err)
 	}
-	fmt.Println("Found primary network IP:", primaryIP)
+	log.Default().Info("Found primary network IP:", primaryIP)
 
 	assigned, err := CheckSecondaryLanIp(ctx, iface, primaryIP)
 	if err != nil {
@@ -109,17 +111,17 @@ func SetupDirectInterfaces(ctx context.Context, ifaces []string) error {
 }
 
 func FindPrimaryNetworkIP(ctx context.Context) (string, error) {
-	fmt.Println("Finding primary network IP")
+	log.Default().Info("Finding primary network IP")
 	return FindInterfaceIP(ctx, PrimaryLanIpPrefix, "")
 }
 
 func FindSecondaryNetworkIP(ctx context.Context, iface string) (string, error) {
-	fmt.Println("Finding secondary network IP for interface:", iface)
+	log.Default().Info("Finding secondary network IP for interface:", iface)
 	return FindInterfaceIP(ctx, SecondaryLanIpPrefix, iface)
 }
 
 func FindInterfaceIP(ctx context.Context, prefix string, iface string) (string, error) {
-	fmt.Println("Finding IP for prefix", prefix, "with interface:", iface)
+	log.Default().Info("Finding IP for prefix", prefix, "with interface:", iface)
 	args := []string{
 		"addr",
 		"show",
@@ -146,7 +148,7 @@ func FindInterfaceIP(ctx context.Context, prefix string, iface string) (string, 
 }
 
 func FindSecondaryNetworkInterface(ctx context.Context) ([]string, error) {
-	fmt.Println("Finding secondary network interfaces...")
+	log.Default().Info("Finding secondary network interfaces...")
 	outputBytes, err := ExecIPCommand(ctx, "link", "list")
 	if err != nil {
 		return nil, err
@@ -166,7 +168,7 @@ func FindSecondaryNetworkInterface(ctx context.Context) ([]string, error) {
 	if len(ifaces) == 0 {
 		return nil, fmt.Errorf("no secondary network interfaces found")
 	}
-	fmt.Println("Found secondary network interfaces:", ifaces)
+	log.Default().Info("Found secondary network interfaces:", ifaces)
 	return ifaces, nil
 }
 
@@ -183,7 +185,7 @@ func FilterDirectRoutes(routes []string) []string {
 }
 
 func FindInterfaceRoutes(ctx context.Context, iface string) ([]string, error) {
-	fmt.Println("Finding routes for interface:", iface)
+	log.Default().Info("Finding routes for interface:", iface)
 	output, err := ExecIPCommand(ctx, "route", "show", "dev", iface)
 	if err != nil {
 		return nil, err
@@ -201,24 +203,24 @@ func FindInterfaceRoutes(ctx context.Context, iface string) ([]string, error) {
 		ip := strings.TrimSpace(parts[0])
 		routes = append(routes, ip)
 	}
-	fmt.Println("Found routes for interface", iface, ":", routes)
+	log.Default().Info("Found routes for interface", iface, ":", routes)
 	return routes, nil
 }
 
 func CheckSecondaryLanIp(ctx context.Context, interfaceName, primaryIP string) (bool, error) {
-	fmt.Println("Checking if secondary LAN IP is assigned to interface:", interfaceName)
+	log.Default().Info("Checking if secondary LAN IP is assigned to interface:", interfaceName)
 	secondaryIP := SecondaryIPFromPrimaryIP(primaryIP)
 	existing, err := FindSecondaryNetworkIP(ctx, interfaceName)
 	if err != nil {
 		return false, err
 	}
-	fmt.Println("Found existing secondary IP:", existing, "for interface", interfaceName)
+	log.Default().Info("Found existing secondary IP:", existing, "for interface", interfaceName)
 	return existing == secondaryIP, nil
 }
 
 func AssignSecondaryLanIp(ctx context.Context, interfaceName string, primaryIP string) error {
 	secondaryIP := SecondaryIPFromPrimaryIP(primaryIP)
-	fmt.Println("Assigning secondary LAN IP", secondaryIP, "to interface", interfaceName)
+	log.Default().Info("Assigning secondary LAN IP", secondaryIP, "to interface", interfaceName)
 	_, err := ExecIPCommand(ctx, "addr", "show", secondaryIP, "dev", interfaceName)
 	return err
 }
@@ -238,39 +240,39 @@ func AssignSecondaryLanCidrRoute(ctx context.Context, interfaceName string) erro
 		return fmt.Errorf("failed to check secondary LAN CIDR route: %w", err)
 	}
 	if exists {
-		fmt.Println("Secondary LAN CIDR route already exists for interface", interfaceName, ":", SecondaryLanCidr)
+		log.Default().Info("Secondary LAN CIDR route already exists for interface", interfaceName, ":", SecondaryLanCidr)
 		return nil
 	}
-	fmt.Println("Adding secondary LAN CIDR route", SecondaryLanCidr, "to interface", interfaceName)
+	log.Default().Info("Adding secondary LAN CIDR route", SecondaryLanCidr, "to interface", interfaceName)
 	return AddInterfaceRoute(ctx, interfaceName, SecondaryLanCidr)
 }
 
 func AddInterfaceRoute(ctx context.Context, iface, cidr string) error {
-	fmt.Println("Adding route", cidr, "to interface", iface)
+	log.Default().Info("Adding route", cidr, "to interface", iface)
 	_, err := ExecIPCommand(ctx, "route", "add", cidr, "dev", iface)
 	return err
 }
 
 func RemoveInterfaceRoute(ctx context.Context, iface, cidr string) error {
-	fmt.Println("Removing route", cidr, "to interface", iface)
+	log.Default().Info("Removing route", cidr, "to interface", iface)
 	_, err := ExecIPCommand(ctx, "route", "show", "dev", iface)
 	return err
 }
 
 func SetInterfaceDown(ctx context.Context, interfaceName string) error {
-	fmt.Println("Seetting secondary network interface to down")
+	log.Default().Info("Seetting secondary network interface to down")
 	_, err := ExecIPCommand(ctx, "link", "set", interfaceName, "down")
 	return err
 }
 
 func SetInterfaceUp(ctx context.Context, interfaceName string) error {
-	fmt.Println("Seetting secondary network interface to up")
+	log.Default().Info("Seetting secondary network interface to up")
 	_, err := ExecIPCommand(ctx, "link", "set", interfaceName, "up")
 	return err
 }
 
 func ExecIPCommand(ctx context.Context, args ...string) ([]byte, error) {
-	// fmt.Println("Executing IP command:", args)
+	// log.Default().Info("Executing IP command:", args)
 	cmd := exec.CommandContext(ctx,
 		"ip",
 		args...,

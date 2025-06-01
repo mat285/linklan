@@ -8,6 +8,7 @@ import (
 
 	"github.com/mat285/linklan/discover"
 	"github.com/mat285/linklan/link"
+	"github.com/mat285/linklan/log"
 )
 
 const (
@@ -20,12 +21,16 @@ type Daemon struct {
 	lock   sync.Mutex
 	cancel context.CancelFunc
 
+	Log *log.Logger
+
 	LocalIP string
 	Peers   []string
 }
 
 func New() *Daemon {
-	return &Daemon{}
+	return &Daemon{
+		Log: log.New(),
+	}
 }
 
 func (d *Daemon) Start(ctx context.Context) error {
@@ -46,7 +51,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 			return ctx.Err()
 		case <-ticker.C:
 			if err := d.runSync(ctx); err != nil {
-				fmt.Println("Error during sync:", err)
+				d.Log.Info("Error during sync:", err)
 			}
 		}
 	}
@@ -64,7 +69,7 @@ func (d *Daemon) Stop() {
 }
 
 func (d *Daemon) init(ctx context.Context) error {
-	fmt.Println("Initializing daemon: ensuring direct LAN connection and discovering peers")
+	d.Log.Info("Initializing daemon: ensuring direct LAN connection and discovering peers")
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	attempts := 0
@@ -77,10 +82,10 @@ func (d *Daemon) init(ctx context.Context) error {
 		ip, err := link.FindPrimaryNetworkIP(ctx)
 		if err == nil {
 			d.LocalIP = ip
-			fmt.Println("Daemon initialized with primary network IP:", d.LocalIP)
+			d.Log.Info("Daemon initialized with primary network IP:", d.LocalIP)
 			return nil
 		}
-		fmt.Println("Attempt", attempts+1, "to find primary network IP failed:", err)
+		d.Log.Info("Attempt", attempts+1, "to find primary network IP failed:", err)
 		if attempts < MaxInitAttempts {
 			attempts++
 			select {
@@ -96,7 +101,7 @@ func (d *Daemon) init(ctx context.Context) error {
 func (d *Daemon) runSync(ctx context.Context) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	fmt.Println("Running sync: ensuring direct LAN connection and discovering peers")
+	d.Log.Info("Running sync: ensuring direct LAN connection and discovering peers")
 	err := link.EnsureDirectLan(ctx, d.Peers)
 	if err != nil {
 		return err

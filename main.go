@@ -7,6 +7,7 @@ import (
 
 	"github.com/mat285/linklan/discover"
 	"github.com/mat285/linklan/link"
+	"github.com/mat285/linklan/log"
 )
 
 func main() {
@@ -33,6 +34,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println("Direct LAN setup completed successfully")
+	log.Default().Info("Direct LAN setup completed successfully")
 	os.Exit(0)
 }

@@ -2,13 +2,13 @@ package discover
 
 import (
 	"context"
-	"fmt"
 	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
 
 	"github.com/mat285/linklan/link"
+	"github.com/mat285/linklan/log"
 )
 
 var isIP = regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$`)
@@ -19,12 +19,12 @@ type KubeAddress struct {
 }
 
 func GetKubeNodeIPs(ctx context.Context) ([]string, error) {
-	fmt.Println("Fetching Kubernetes node IPs...")
+	log.Default().Info("Fetching Kubernetes node IPs...")
 	cmd := exec.CommandContext(ctx, "kubectl", "get", "nodes", "-o", "jsonpath='{.items[*].status.addresses[*].address}'")
 	cmd.Env = append(cmd.Env, "KUBECONFIG=/home/michael/.kube/config")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		fmt.Println("Error executing kubectl command:", string(output))
+		log.Default().Info("Error executing kubectl command:", string(output))
 		return nil, err
 	}
 	addrs := strings.Split(string(output), " ")
@@ -44,7 +44,7 @@ func GetActiveKubePeers(ctx context.Context, localIP string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("Checking for active peers from", ips)
+	log.Default().Info("Checking for active peers from", ips)
 	filteredIPs := []string{}
 	lock := new(sync.Mutex)
 	wg := new(sync.WaitGroup)
@@ -64,6 +64,6 @@ func GetActiveKubePeers(ctx context.Context, localIP string) ([]string, error) {
 		}(ip)
 	}
 	wg.Wait()
-	fmt.Println("Active peers found:", filteredIPs)
+	log.Default().Info("Active peers found:", filteredIPs)
 	return filteredIPs, nil
 }
