@@ -188,9 +188,6 @@ func FindInterfaceRoutes(ctx context.Context, iface string) (map[string]struct{}
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		if !strings.Contains(line, iface) {
-			continue
-		}
 		parts := strings.Split(line, " ")
 		if len(parts) == 0 {
 			continue
