@@ -128,6 +128,7 @@ func FindSecondaryNetworkInterface(ctx context.Context) (string, error) {
 func AssignSecondaryLanIp(ctx context.Context, interfaceName string, primaryIP string) error {
 	secondaryIP := fmt.Sprintf("%s%s", SecondaryLanIpPrefix, strings.TrimPrefix(primaryIP, PrimaryLanIpPrefix))
 	existing, err := FindSecondaryNetworkIP(ctx, interfaceName)
+	fmt.Println("found existing secondary IP:", existing, "for interface", interfaceName)
 	if err == nil && existing == secondaryIP {
 		fmt.Println("Secondary LAN IP already assigned:", existing, "to interface", interfaceName)
 		return nil
