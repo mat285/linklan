@@ -79,6 +79,7 @@ func FindPrimaryNetworkIP(ctx context.Context) (string, error) {
 }
 
 func FindSecondaryNetworkIP(ctx context.Context, iface string) (string, error) {
+	fmt.Println("Finding secondary network IP for interface:", iface)
 	output, err := exec.CommandContext(ctx,
 		"ip",
 		"addr",
@@ -89,14 +90,15 @@ func FindSecondaryNetworkIP(ctx context.Context, iface string) (string, error) {
 		return "", err
 	}
 	str := string(output)
+	fmt.Println("Output from ip addr show:", str)
 	idx := strings.Index(str, SecondaryInterfacePrefix)
 	if idx < 0 {
-		return "", fmt.Errorf("no primary network IP found")
+		return "", fmt.Errorf("no secondary network IP found")
 	}
 	str = str[idx:]
 	idx = strings.Index(str, "/")
 	if idx < 0 {
-		return "", fmt.Errorf("no primary network IP found")
+		return "", fmt.Errorf("no secondary network IP found")
 	}
 	str = str[:idx]
 	return strings.TrimSpace(str), nil
