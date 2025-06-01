@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/mat285/linklan/link"
 )
@@ -43,15 +44,24 @@ func GetActiveKubePeers(ctx context.Context, localIP string) ([]string, error) {
 	}
 	fmt.Println("Checking for active peers from", ips)
 	filteredIPs := []string{}
+	lock := new(sync.Mutex)
+	wg := new(sync.WaitGroup)
 	for _, ip := range ips {
 		if ip == localIP {
 			continue
 		}
-		err := TCPPing(ctx, link.SecondaryIPFromPrimaryIP(ip), 16443)
-		if err == nil {
-			filteredIPs = append(filteredIPs, ip)
-		}
+		wg.Add(1)
+		go func(ip string) {
+			defer wg.Done()
+			err := TCPPing(ctx, link.SecondaryIPFromPrimaryIP(ip), 16443)
+			if err == nil {
+				lock.Lock()
+				filteredIPs = append(filteredIPs, ip)
+				lock.Unlock()
+			}
+		}(ip)
 	}
+	wg.Wait()
 	fmt.Println("Active peers found:", filteredIPs)
 	return filteredIPs, nil
 }
