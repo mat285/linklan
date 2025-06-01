@@ -82,8 +82,12 @@ func (d *Daemon) init(ctx context.Context) error {
 		}
 		fmt.Println("Attempt", attempts+1, "to find primary network IP failed:", err)
 		if attempts < MaxInitAttempts {
-			time.Sleep(InitRetryDelay)
 			attempts++
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(InitRetryDelay):
+			}
 		}
 	}
 	return fmt.Errorf("failed to find primary network IP after %d attempts", MaxInitAttempts)
