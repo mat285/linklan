@@ -226,7 +226,7 @@ func FindInterfaceRoutes(ctx context.Context, iface string) (map[string]struct{}
 
 func CheckSecondaryLanIp(ctx context.Context, interfaceName, primaryIP string) (bool, error) {
 	fmt.Println("Checking if secondary LAN IP is assigned to interface:", interfaceName)
-	secondaryIP := fmt.Sprintf("%s%s", SecondaryLanIpPrefix, strings.TrimPrefix(PrimaryLanIpPrefix, PrimaryLanIpPrefix))
+	secondaryIP := SecondaryIPFromPrimaryIP(primaryIP)
 	existing, err := FindSecondaryNetworkIP(ctx, interfaceName)
 	if err != nil {
 		return false, err
@@ -236,7 +236,7 @@ func CheckSecondaryLanIp(ctx context.Context, interfaceName, primaryIP string) (
 }
 
 func AssignSecondaryLanIp(ctx context.Context, interfaceName string, primaryIP string) error {
-	secondaryIP := fmt.Sprintf("%s%s", SecondaryLanIpPrefix, strings.TrimPrefix(primaryIP, PrimaryLanIpPrefix))
+	secondaryIP := SecondaryIPFromPrimaryIP(primaryIP)
 	fmt.Println("Assigning secondary LAN IP", secondaryIP, "to interface", interfaceName)
 	cmd := exec.CommandContext(ctx,
 		"ip",
@@ -329,4 +329,9 @@ func SetInterfaceUp(ctx context.Context, interfaceName string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func SecondaryIPFromPrimaryIP(primaryIP string) string {
+	secondaryIP := fmt.Sprintf("%s%s", SecondaryLanIpPrefix, strings.TrimPrefix(primaryIP, PrimaryLanIpPrefix))
+	return secondaryIP
 }
