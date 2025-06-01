@@ -31,6 +31,11 @@ const (
 )
 
 func SetDirectRoutes(ctx context.Context, iface string, peers []string) error {
+	ifaces, err := FindSecondaryNetworkInterface(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to find secondary network interface: %w", err)
+	}
+	iface = ifaces[0]
 	existing, err := FindInterfaceSingleRoutes(ctx, iface)
 	if err != nil {
 		return fmt.Errorf("failed to find existing routes for interface %s: %w", iface, err)
