@@ -22,7 +22,7 @@ func GetKubeNodeIPs(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	var addresses []KubeAddress
-	err = json.Unmarshal(output, &addresses)
+	err = json.Unmarshal(output[1:len(output)-1], &addresses)
 	if err != nil {
 		return nil, err
 	}
