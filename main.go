@@ -78,6 +78,30 @@ func FindPrimaryNetworkIP(ctx context.Context) (string, error) {
 	return strings.TrimSpace(str), nil
 }
 
+func FindSecondaryNetworkIP(ctx context.Context, iface string) (string, error) {
+	output, err := exec.CommandContext(ctx,
+		"ip",
+		"addr",
+		"show",
+		iface,
+	).CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	str := string(output)
+	idx := strings.Index(str, SecondaryInterfacePrefixs)
+	if idx < 0 {
+		return "", fmt.Errorf("no primary network IP found")
+	}
+	str = str[idx:]
+	idx = strings.Index(str, "/")
+	if idx < 0 {
+		return "", fmt.Errorf("no primary network IP found")
+	}
+	str = str[:idx]
+	return strings.TrimSpace(str), nil
+}
+
 func FindSecondaryNetworkInterface(ctx context.Context) (string, error) {
 	output, err := exec.CommandContext(ctx,
 		"ip",
@@ -101,6 +125,11 @@ func FindSecondaryNetworkInterface(ctx context.Context) (string, error) {
 
 func AssignSecondaryLanIp(ctx context.Context, interfaceName string, primaryIP string) error {
 	secondaryIP := fmt.Sprintf("%s%s", SecondaryLanIpPrefix, strings.TrimPrefix(primaryIP, PrimaryLanIpPrefix))
+	existing, err := FindSecondaryNetworkIP(ctx, interfaceName)
+	if err == nil && existing == secondaryIP {
+		fmt.Println("Secondary LAN IP already assigned:", existing, "to interface", interfaceName)
+		return nil
+	}
 	fmt.Println("Assigning secondary LAN IP", secondaryIP, "to interface", interfaceName)
 	cmd := exec.CommandContext(ctx,
 		"ip",
