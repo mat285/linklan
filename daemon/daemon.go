@@ -64,6 +64,7 @@ func (d *Daemon) Stop() {
 }
 
 func (d *Daemon) init(ctx context.Context) error {
+	fmt.Println("Initializing daemon: ensuring direct LAN connection and discovering peers")
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	attempts := 0
@@ -71,6 +72,7 @@ func (d *Daemon) init(ctx context.Context) error {
 		ip, err := link.FindPrimaryNetworkIP(ctx)
 		if err == nil {
 			d.LocalIP = ip
+			fmt.Println("Daemon initialized with primary network IP:", d.LocalIP)
 			return nil
 		}
 		fmt.Println("Attempt", attempts+1, "to find primary network IP failed:", err)
@@ -85,6 +87,7 @@ func (d *Daemon) init(ctx context.Context) error {
 func (d *Daemon) runSync(ctx context.Context) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	fmt.Println("Running sync: ensuring direct LAN connection and discovering peers")
 	err := link.EnsureDirectLan(ctx, d.Peers)
 	if err != nil {
 		return err
