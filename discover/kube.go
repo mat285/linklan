@@ -17,12 +17,14 @@ type KubeAddress struct {
 func GetKubeNodeIPs(ctx context.Context) ([]string, error) {
 	fmt.Println("Fetching Kubernetes node IPs...")
 	output, err := exec.CommandContext(ctx, "kubectl", "get", "nodes", "-o", "jsonpath='{.items[*].status.addresses}'").CombinedOutput()
-	fmt.Println("Command output:", string(output))
 	if err != nil {
+		fmt.Println("Error executing kubectl command:", string(output))
 		return nil, err
 	}
+	output = output[1 : len(output)-1]
+	fmt.Println("Raw output from kubectl:", string(output))
 	var addresses []KubeAddress
-	err = json.Unmarshal(output[1:len(output)-1], &addresses)
+	err = json.Unmarshal(output, &addresses)
 	if err != nil {
 		return nil, err
 	}
