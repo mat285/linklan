@@ -3,7 +3,6 @@ package link
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 )
@@ -273,8 +272,8 @@ func ExecIPCommand(ctx context.Context, args ...string) ([]byte, error) {
 		"ip",
 		args...,
 	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// cmd.Stdout = os.Stdout
+	// cmd.Stderr = os.Stderr
 	return cmd.CombinedOutput()
 }
 
