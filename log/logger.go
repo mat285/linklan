@@ -30,17 +30,17 @@ func (l *Logger) Info(msg string, msgs ...any) {
 	for _, m := range msgs {
 		strs = append(strs, fmt.Sprintf("%v", m))
 	}
-	l.Infof(strings.Join(strs, " "))
+	l.Infof("%s", strings.Join(strs, " "))
 }
 
 func (l *Logger) Infof(format string, args ...any) {
-	l.Logger.Info(fmt.Sprintf(format+"\n", args...))
+	l.Logger.Info(fmt.Sprintf(format, args...))
 }
 
 func (l *Logger) Errorf(format string, args ...any) {
-	l.Logger.Error(fmt.Sprintf(format+"\n", args...))
+	l.Logger.Error(fmt.Sprintf(format, args...))
 }
 
 func (l *Logger) Warnf(format string, args ...any) {
-	l.Logger.Warn(fmt.Sprintf(format+"\n", args...))
+	l.Logger.Warn(fmt.Sprintf(format, args...))
 }
