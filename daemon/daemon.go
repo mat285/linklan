@@ -69,6 +69,11 @@ func (d *Daemon) init(ctx context.Context) error {
 	defer d.lock.Unlock()
 	attempts := 0
 	for attempts < MaxInitAttempts {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		ip, err := link.FindPrimaryNetworkIP(ctx)
 		if err == nil {
 			d.LocalIP = ip
