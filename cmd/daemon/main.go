@@ -15,4 +15,8 @@ func main() {
 	defer cancel()
 
 	d := daemon.New()
+	if err := d.Start(ctx); err != nil {
+		os.Stderr.WriteString("Error starting daemon: " + err.Error() + "\n")
+		os.Exit(1)
+	}
 }
