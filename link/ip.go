@@ -188,6 +188,9 @@ func HandleBondedInterfaces(ctx context.Context, primaryIP string, ifaces []stri
 
 func EnsureBondInterface(ctx context.Context) error {
 	log.Default().Info("Ensuring bond interface is set up")
+	if err := exec.CommandContext(ctx, "modprobe", "bonding").Run(); err != nil {
+		return fmt.Errorf("failed to load bonding module: %w", err)
+	}
 	output, err := ExecIPCommand(ctx, "link", "show", BondInterfaceName) // Clean up any existing bond
 	if err != nil {
 		return fmt.Errorf("failed to check existing bond interface: %w", err)
