@@ -259,6 +259,8 @@ func FindSecondaryNetworkInterface(ctx context.Context) ([]string, error) {
 		}
 		iface := strings.TrimSpace(output[:end])
 		ifaces = append(ifaces, strings.TrimSpace(iface))
+		output = output[end+1:]
+		idx = strings.Index(output, SecondaryInterfacePrefix)
 	}
 	if len(ifaces) == 0 {
 		return nil, fmt.Errorf("no secondary network interfaces found")
