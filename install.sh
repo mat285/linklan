@@ -7,6 +7,10 @@ if [ -z "$VERSION" ]; then
     VERSION="v0.1.0"
 fi
 
+sudo systemctl stop linklandaemon.service || true
+sudo systemctl disable linklandaemon.service || true
+echo "Installing LinkLan daemon version $VERSION..."
+
 curl -Lo linklandaemon https://github.com/mat285/linklan/releases/download/v0.1.0/linklandaemon_amd64
 sudo mv linklandaemon /bin/linklandaemon
 sudo chown root:root /bin/linklandaemon
