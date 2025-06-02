@@ -1,8 +1,12 @@
-VERSION ?= v0.1
+VERSION ?= v0.1.0
 GIT_SHA ?= $(shell git log --pretty=format:'%H' -n 1 2> /dev/null | cut -c1-8)
 
 .PHONY: release
 release: build push-files
+
+.PHONY: create-release
+create-release:
+	gh release create ${VERSION} --title "${VERSION}" --notes "Release ${VERSION} - Build ${GIT_SHA}" --generate-notes
 
 .PHONY: push-files
 push-files:
