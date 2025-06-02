@@ -309,6 +309,10 @@ func CheckSecondaryLanIp(ctx context.Context, interfaceName, primaryIP string) (
 	secondaryIP := SecondaryIPFromPrimaryIP(primaryIP)
 	existing, err := FindSecondaryNetworkIP(ctx, interfaceName)
 	if err != nil {
+		if err.Error() == "no network IP found" {
+			log.Default().Info("No secondary IP found for interface", interfaceName, "assuming it is not assigned")
+			return false, nil
+		}
 		return false, err
 	}
 	log.Default().Info("Found existing secondary IP:", existing, "for interface", interfaceName)
