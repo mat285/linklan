@@ -29,7 +29,7 @@ func GetKubeNodeIPs(ctx context.Context) ([]string, error) {
 		log.Default().Info("Error executing kubectl command:", string(output))
 		return nil, err
 	}
-	addrs := strings.Split(string(output), " ")
+	addrs := strings.Split(strings.Trim(string(output), "'"), " ")
 	var ips []string
 	for _, addr := range addrs {
 		addr = strings.TrimSpace(addr)
