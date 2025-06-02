@@ -7,6 +7,11 @@ if [ -z "$VERSION" ]; then
     VERSION="v0.1.0"
 fi
 
+which kubectl >/dev/null 2>&1 || {
+    echo "kubectl is not installed. Please install kubectl first."
+    exit 1
+}
+
 sudo systemctl stop linklandaemon.service || true
 sudo systemctl disable linklandaemon.service || true
 echo "Installing LinkLan daemon version $VERSION..."
