@@ -322,7 +322,8 @@ func CheckSecondaryLanIp(ctx context.Context, interfaceName, primaryIP string) (
 func AssignSecondaryLanIp(ctx context.Context, interfaceName string, primaryIP string) error {
 	secondaryIP := SecondaryIPFromPrimaryIP(primaryIP)
 	log.Default().Info("Assigning secondary LAN IP", secondaryIP, "to interface", interfaceName)
-	_, err := ExecIPCommand(ctx, "addr", "show", secondaryIP, "dev", interfaceName)
+	output, err := ExecIPCommand(ctx, "addr", "show", secondaryIP, "dev", interfaceName)
+	fmt.Println("output", string(output))
 	return err
 }
 
