@@ -121,6 +121,16 @@ func SetupDirectInterfaces(ctx context.Context, ifaces []string) error {
 		if err := SetInterfaceUp(ctx, iface); err != nil {
 			return fmt.Errorf("failed to set interface up: %w", err)
 		}
+		if iface == BondInterfaceName {
+			for _, i := range ifaces {
+				if i == iface {
+					continue // Skip the bond interface itself
+				}
+				if err := SetInterfaceUp(ctx, i); err != nil {
+					return fmt.Errorf("failed to set interface %s up: %w", i, err)
+				}
+			}
+		}
 		if err := AssignSecondaryLanIp(ctx, iface, primaryIP); err != nil {
 			return fmt.Errorf("failed to assign lan ip: %w", err)
 		}
