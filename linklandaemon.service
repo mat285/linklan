@@ -3,3 +3,6 @@ Description=Linklan Daemon service
 
 [Service]
 ExecStart=/usr/local/bin/linklandaemon
+
+[Install]
+WantedBy=multi-user.target
