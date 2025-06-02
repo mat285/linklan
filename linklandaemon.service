@@ -9,7 +9,7 @@ StandardError=syslog
 SyslogIdentifier=linklandaemon
 User=root
 Group=root
-Environment=PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin
+Environment=PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin:/snap/bin
 ExecStart=/bin/linklandaemon
 Restart=always
 ExecReload=/bin/kill -HUP $MAINPID
