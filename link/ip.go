@@ -137,9 +137,6 @@ func HandleBondedInterfaces(ctx context.Context, primaryIP string, ifaces []stri
 		if err := BondInterfaces(ctx, unboundIfaces); err != nil {
 			return fmt.Errorf("failed to bond interfaces: %w", err)
 		}
-		if err := SetInterfaceUp(ctx, BondInterfaceName); err != nil {
-			return fmt.Errorf("failed to set bonded interface: %w", err)
-		}
 	}
 	log.Default().Info("All interfaces are bonded to", BondInterfaceName)
 
@@ -150,6 +147,10 @@ func HandleBondedInterfaces(ctx context.Context, primaryIP string, ifaces []stri
 		if err := SetInterfaceUp(ctx, i); err != nil {
 			return fmt.Errorf("failed to set interface %s up: %w", i, err)
 		}
+	}
+
+	if err := SetInterfaceUp(ctx, BondInterfaceName); err != nil {
+		return fmt.Errorf("failed to set bond interface up: %w", err)
 	}
 
 	assigned, err := CheckSecondaryLanIp(ctx, BondInterfaceName, primaryIP)
