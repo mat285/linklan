@@ -7,7 +7,7 @@ release: build push-files
 .PHONY: push-files
 push-files:
 	@echo "Pushing files to GitHub release..."
-	gh release upload ${VERSION} build/linklandaemon_amd64 build/linklandaemon_arm64 --clobber
+	gh release upload ${VERSION} build/linklandaemon_amd64 build/linklandaemon_arm64 linklandaemon.service install.sh --clobber
 
 .PHONY: build
 build:
