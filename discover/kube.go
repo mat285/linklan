@@ -34,7 +34,8 @@ func GetKubeNodeIPs(ctx context.Context) ([]string, error) {
 	for _, addr := range addrs {
 		addr = strings.TrimSpace(addr)
 		fmt.Println("Processing address:", addr)
-		if !isIP.MatchString(addr) {
+		if !strings.HasPrefix(addr, link.PrimaryLanIpPrefix) {
+			log.Default().Info("Skipping address not starting with primary LAN IP prefix:", addr)
 			continue
 		}
 		ips = append(ips, addr)
