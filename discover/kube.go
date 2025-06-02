@@ -33,6 +33,7 @@ func GetKubeNodeIPs(ctx context.Context) ([]string, error) {
 	var ips []string
 	for _, addr := range addrs {
 		addr = strings.TrimSpace(addr)
+		fmt.Println("Processing address:", addr)
 		if !isIP.MatchString(addr) {
 			continue
 		}
