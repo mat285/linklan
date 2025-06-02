@@ -1,8 +1,18 @@
 [Unit]
-Description=Linklan Daemon service
+Description=Lanlink daemon
+After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/linklandaemon
+Type=simple
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=linklandaemon
+User=root
+Group=root
+Environment=PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin
+ExecStart=/bin/linklandaemon
+Restart=always
+ExecReload=/bin/kill -HUP $MAINPID
 
 [Install]
 WantedBy=multi-user.target
