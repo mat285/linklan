@@ -96,7 +96,7 @@ func SetupDirectInterfaces(ctx context.Context, ifaces []string) error {
 		ifaces = append(ifaces, BondInterfaceName)
 	}
 	for _, iface := range ifaces {
-		if err := AssignIPAndCidr(ctx, iface, primaryIP); err != nil {
+		if err := AssignIPAndCidr(ctx, iface, primaryIP, len(ifaces) == 1 || iface == BondInterfaceName); err != nil {
 			return fmt.Errorf("failed to assign IP and CIDR for interface %s: %w", iface, err)
 		}
 		log.Default().Info("Assigned IP and CIDR for interface:", iface)
@@ -104,7 +104,7 @@ func SetupDirectInterfaces(ctx context.Context, ifaces []string) error {
 	return nil
 }
 
-func AssignIPAndCidr(ctx context.Context, iface string, primaryIP string) error {
+func AssignIPAndCidr(ctx context.Context, iface string, primaryIP string, cidr bool) error {
 	assigned, err := CheckSecondaryLanIp(ctx, iface, primaryIP)
 	if err != nil {
 		return fmt.Errorf("failed to check secondary LAN IP: %w", err)
@@ -120,8 +120,10 @@ func AssignIPAndCidr(ctx context.Context, iface string, primaryIP string) error 
 			return fmt.Errorf("failed to assign lan ip: %w", err)
 		}
 	}
-	if err := AssignSecondaryLanCidrRoute(ctx, iface); err != nil {
-		return fmt.Errorf("failed to assign lan routes: %w", err)
+	if cidr {
+		if err := AssignSecondaryLanCidrRoute(ctx, iface); err != nil {
+			return fmt.Errorf("failed to assign lan routes: %w", err)
+		}
 	}
 	return SetInterfaceUp(ctx, iface)
 }
