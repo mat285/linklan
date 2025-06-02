@@ -90,24 +90,7 @@ func SetupDirectInterfaces(ctx context.Context, ifaces []string) error {
 	log.Default().Info("Found primary network IP:", primaryIP)
 	iface := ifaces[0]
 	if len(ifaces) > 1 {
-		log.Default().Info("Multiple secondary interfaces found, ensuring bond interface is set up")
-		if err := EnsureBondInterface(ctx); err != nil {
-			return fmt.Errorf("failed to ensure bond interface: %w", err)
-		}
-		unboundIfaces, err := UnbondedInterfaces(ctx, ifaces)
-		if err != nil {
-			return fmt.Errorf("failed to find unbonded interfaces: %w", err)
-		}
-		if len(unboundIfaces) > 0 {
-			if err := BondInterfaces(ctx, unboundIfaces); err != nil {
-				return fmt.Errorf("failed to bond interfaces: %w", err)
-			}
-			if err := SetInterfaceUp(ctx, BondInterfaceName); err != nil {
-				return fmt.Errorf("failed to set bonded interface: %w", err)
-			}
-		}
-		log.Default().Info("All interfaces are bonded to", BondInterfaceName)
-		iface = BondInterfaceName
+		return HandleBondedInterfaces(ctx, primaryIP, ifaces)
 	}
 
 	assigned, err := CheckSecondaryLanIp(ctx, iface, primaryIP)
@@ -136,6 +119,68 @@ func SetupDirectInterfaces(ctx context.Context, ifaces []string) error {
 		}
 	}
 	if err := AssignSecondaryLanCidrRoute(ctx, iface); err != nil {
+		return fmt.Errorf("failed to assign lan routes: %w", err)
+	}
+	return nil
+}
+
+func HandleBondedInterfaces(ctx context.Context, primaryIP string, ifaces []string) error {
+	log.Default().Info("Multiple secondary interfaces found, ensuring bond interface is set up")
+	if err := EnsureBondInterface(ctx); err != nil {
+		return fmt.Errorf("failed to ensure bond interface: %w", err)
+	}
+	unboundIfaces, err := UnbondedInterfaces(ctx, ifaces)
+	if err != nil {
+		return fmt.Errorf("failed to find unbonded interfaces: %w", err)
+	}
+	if len(unboundIfaces) > 0 {
+		if err := BondInterfaces(ctx, unboundIfaces); err != nil {
+			return fmt.Errorf("failed to bond interfaces: %w", err)
+		}
+		if err := SetInterfaceUp(ctx, BondInterfaceName); err != nil {
+			return fmt.Errorf("failed to set bonded interface: %w", err)
+		}
+	}
+	log.Default().Info("All interfaces are bonded to", BondInterfaceName)
+
+	for _, i := range ifaces {
+		if i == BondInterfaceName {
+			continue // Skip the bond interface itself
+		}
+		if err := SetInterfaceUp(ctx, i); err != nil {
+			return fmt.Errorf("failed to set interface %s up: %w", i, err)
+		}
+	}
+
+	assigned, err := CheckSecondaryLanIp(ctx, BondInterfaceName, primaryIP)
+	if err != nil {
+		return fmt.Errorf("failed to check secondary LAN IP: %w", err)
+	}
+	if !assigned {
+		if err := SetInterfaceDown(ctx, BondInterfaceName); err != nil {
+			return fmt.Errorf("failed to set interface down: %w", err)
+		}
+		for _, i := range ifaces {
+			log.Default().Info("Setting interface", i, "down and up to ensure it is ready")
+			// Ensure all interfaces are down and up to apply changes
+			if err := SetInterfaceDown(ctx, i); err != nil {
+				return fmt.Errorf("failed to set interface down: %w", err)
+			}
+		}
+		if err := SetInterfaceUp(ctx, BondInterfaceName); err != nil {
+			return fmt.Errorf("failed to set interface up: %w", err)
+		}
+		for _, i := range ifaces {
+			log.Default().Info("Setting interface", i, "up and up to ensure it is ready")
+			if err := SetInterfaceUp(ctx, i); err != nil {
+				return fmt.Errorf("failed to set interface up: %w", err)
+			}
+		}
+		if err := AssignSecondaryLanIp(ctx, BondInterfaceName, primaryIP); err != nil {
+			return fmt.Errorf("failed to assign lan ip: %w", err)
+		}
+	}
+	if err := AssignSecondaryLanCidrRoute(ctx, BondInterfaceName); err != nil {
 		return fmt.Errorf("failed to assign lan routes: %w", err)
 	}
 	return nil
