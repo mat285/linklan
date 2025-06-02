@@ -5,7 +5,7 @@ set -e
 sudo curl --output /usr/local/bin/linklandaemon https://github.com/mat285/linklan/releases/download/v0.1/linklandaemon_amd64
 
 sudo chmod +x /usr/local/bin/linklandaemon
-sudo curl --output /etc/systemd/system/linklandaemon.service https://raw.githubusercontent.com/mat285/linklan/main/linklandaemon.service
+sudo curl --output /etc/systemd/system/linklandaemon.service https://raw.githubusercontent.com/mat285/linklan/refs/heads/main/linklandaemon.service
 
 sudo systemctl enable linklandaemon.service
 sudo systemctl start linklandaemon.service
