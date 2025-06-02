@@ -45,6 +45,11 @@ func (d *Daemon) Start(ctx context.Context) error {
 	d.cancel = cancel
 	d.lock.Unlock()
 
+	// initial sync before starting the ticker
+	if err := d.runSync(ctx); err != nil {
+		d.Log.Info("Error during sync:", err)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
