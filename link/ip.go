@@ -102,11 +102,11 @@ func SetupDirectInterfaces(ctx context.Context, ifaces []string) error {
 			if err := BondInterfaces(ctx, unboundIfaces); err != nil {
 				return fmt.Errorf("failed to bond interfaces: %w", err)
 			}
+			if err := SetInterfaceUp(ctx, BondInterfaceName); err != nil {
+				return fmt.Errorf("failed to set bonded interface: %w", err)
+			}
 		}
 		log.Default().Info("All interfaces are bonded to", BondInterfaceName)
-		if err := SetInterfaceUp(ctx, BondInterfaceName); err != nil {
-			return fmt.Errorf("failed to set bonded interface: %w", err)
-		}
 		iface = BondInterfaceName
 	}
 

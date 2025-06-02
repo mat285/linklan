@@ -2,6 +2,7 @@ package discover
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -23,6 +24,7 @@ func GetKubeNodeIPs(ctx context.Context) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "kubectl", "get", "nodes", "-o", "jsonpath='{.items[*].status.addresses[*].address}'")
 	cmd.Env = append(cmd.Env, "KUBECONFIG=/home/michael/.kube/config")
 	output, err := cmd.CombinedOutput()
+	fmt.Println("Command output:", string(output))
 	if err != nil {
 		log.Default().Info("Error executing kubectl command:", string(output))
 		return nil, err
