@@ -11,14 +11,16 @@ create-release:
 .PHONY: push-files
 push-files:
 	@echo "Pushing files to GitHub release..."
-	gh release upload ${VERSION} build/linklandaemon_amd64 build/linklandaemon_arm64 linklandaemon.service install.sh --clobber
+	gh release upload ${VERSION} build/linklandaemon_linux_amd64 build/linklandaemon_linux_arm64 build/linklandaemon_darwin_arm64 linklandaemon.service install.sh --clobber
 
 .PHONY: build
 build:
-	GOOS=linux GOARCH=amd64 go build -o build/linklandaemon_amd64 cmd/daemon/main.go
-	GOOS=darwin GOARCH=arm64 go build -o build/linklandaemon_arm64 cmd/daemon/main.go
-
+	./build.sh
 
 .PHONY: install
 install:
 	sh -c "$(curl -fsSL https://github.com/mat285/linklan/releases/download/${VERSION}/install.sh)"
+
+.PHONY: install-local
+install-local:
+	./install.sh ${VERSION}

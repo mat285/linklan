@@ -12,16 +12,19 @@ which kubectl >/dev/null 2>&1 || {
     exit 1
 }
 
+ARCH=$(uname -m)
+OS=$(uname -o)
+
 sudo systemctl stop linklandaemon.service || true
 sudo systemctl disable linklandaemon.service || true
-echo "Installing LinkLan daemon version $VERSION..."
+echo "Installing LinkLan daemon version ${VERSION}..."
 
-curl -Lo linklandaemon https://github.com/mat285/linklan/releases/download/v0.1.0/linklandaemon_amd64
+curl -Lo linklandaemon https://github.com/mat285/linklan/releases/download/${VERSION}/linklandaemon_${OS}_${ARCH}
 sudo mv linklandaemon /bin/linklandaemon
 sudo chown root:root /bin/linklandaemon
 sudo chmod a+x /bin/linklandaemon
 
-curl -Lo linklandaemon.service https://github.com/mat285/linklan/releases/download/v0.1.0/linklandaemon.service
+curl -Lo linklandaemon.service https://github.com/mat285/linklan/releases/download/${VERSION}/linklandaemon.service
 sudo mv linklandaemon.service /etc/systemd/system/linklandaemon.service
 sudo chmod 644 /etc/systemd/system/linklandaemon.service
 sudo chown root:root /etc/systemd/system/linklandaemon.service
