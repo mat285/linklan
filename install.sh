@@ -20,6 +20,16 @@ elif [ "$ARCH" = "aarch64" ]; then
     ARCH="arm64"
 fi
 
+if [ "$ARCH" != "amd64" ] && [ "$ARCH" != "arm64" ]; then
+    echo "Unsupported architecture: ${ARCH}"
+    exit 1
+fi
+
+if [ "$OS" != "linux" ] && [ "$OS" != "darwin" ]; then
+    echo "Unsupported OS: ${OS}"
+    exit 1
+fi
+
 echo "Detected OS: ${OS}, Architecture: ${ARCH}"
 
 sudo systemctl stop linklandaemon.service || true
