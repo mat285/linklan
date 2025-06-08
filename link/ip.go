@@ -3,6 +3,8 @@ package link
 import (
 	"context"
 	"fmt"
+	"net"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -12,9 +14,8 @@ import (
 const (
 	PrimaryLanIpPrefix = "192.168.1."
 
-	SecondaryInterfacePrefix = "enx"
-	SecondaryLanIpPrefix     = "192.168.0."
-	SecondaryLanCidr         = SecondaryLanIpPrefix + "0/24"
+	SecondaryLanIpPrefix = "192.168.0."
+	SecondaryLanCidr     = SecondaryLanIpPrefix + "0/24"
 
 	BondInterfaceName = "bond0"
 )
@@ -262,29 +263,104 @@ func FindInterfaceIP(ctx context.Context, prefix string, iface string) (string, 
 
 func FindSecondaryNetworkInterface(ctx context.Context) ([]string, error) {
 	log.Default().Info("Finding secondary network interfaces...")
-	outputBytes, err := ExecIPCommand(ctx, "link", "list")
+	_, ifaces, err := FindPhysicalInterfaces()
 	if err != nil {
-		return nil, err
-	}
-	output := string(outputBytes)
-	ifaces := []string{}
-	idx := strings.Index(output, SecondaryInterfacePrefix)
-	for idx > 0 && idx <= len(output) {
-		output = output[idx:]
-		end := strings.Index(output, ":")
-		if end < 0 {
-			break
-		}
-		iface := strings.TrimSpace(output[:end])
-		ifaces = append(ifaces, strings.TrimSpace(iface))
-		output = output[end+1:]
-		idx = strings.Index(output, SecondaryInterfacePrefix)
+		return nil, fmt.Errorf("failed to find physical interfaces: %w", err)
 	}
 	if len(ifaces) == 0 {
 		return nil, fmt.Errorf("no secondary network interfaces found")
 	}
-	log.Default().Info("Found secondary network interfaces:", ifaces)
-	return ifaces, nil
+	strs := make([]string, len(ifaces))
+	for i, iface := range ifaces {
+		strs[i] = iface.Name
+	}
+	log.Default().Info("Found secondary network interfaces:", strs)
+	return strs, nil
+}
+
+func FindPhysicalInterfaces() (primary *net.Interface, filtered []net.Interface, err error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get network interfaces: %w", err)
+	}
+	log.Default().Info("Found network interfaces:", len(ifaces))
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagLoopback != 0 {
+			log.Default().Info("Skipping loopback interface:", iface.Name)
+			continue
+		}
+		if IsFilteredInterface(iface) {
+			log.Default().Info("Skipping known virtual interface:", iface.Name)
+			continue
+		}
+		isHardware, err := IsHardwareInterface(iface)
+		if err != nil {
+			log.Default().Info("Error checking if interface is hardware:", iface.Name, err)
+			continue
+		}
+		if !isHardware {
+			log.Default().Info("Skipping non-hardware interface:", iface.Name)
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			log.Default().Info("Error getting addresses for interface:", iface.Name, err)
+			continue
+		}
+		for _, addr := range addrs {
+			if strings.HasPrefix(addr.String(), PrimaryLanIpPrefix) {
+				primary = &iface
+				log.Default().Info("Found primary network interface:", iface.Name)
+				break
+			}
+		}
+		if primary != nil && primary == &iface {
+			log.Default().Info("Primary network interface already found, skipping further checks for:", iface.Name)
+			continue
+		}
+		log.Default().Info("Including hardware interface:", iface.Name)
+		filtered = append(filtered, iface)
+	}
+	if primary == nil {
+		return nil, filtered, fmt.Errorf("no primary network interface found")
+	}
+	return primary, filtered, nil
+}
+
+func IsHardwareInterface(iface net.Interface) (bool, error) {
+	dir := "/sys/class/net/" + iface.Name
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return false, fmt.Errorf("failed to get interface info for %s: %w", iface.Name, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return false, fmt.Errorf("interface %s is not a symlink", iface.Name)
+	}
+	rl, err := os.Readlink(dir)
+	if err != nil {
+		return false, fmt.Errorf("failed to read symlink for interface %s: %w", iface.Name, err)
+	}
+	return !strings.Contains(rl, "devices/virtual/"), nil
+}
+
+func IsFilteredInterface(iface net.Interface) bool {
+	virtualIfacePrefixes := []string{
+		"lo",
+		"tun",
+		"veth",
+		"vxlan",
+		"docker",
+		"br-",
+		"tailscale0",
+		"cali", // calico
+	}
+	for _, prefix := range virtualIfacePrefixes {
+		if strings.HasPrefix(iface.Name, prefix) {
+			log.Default().Info("Skipping known virtual interface:", iface.Name)
+			return true
+		}
+	}
+	return false
 }
 
 func FilterDirectRoutes(routes []string) []string {
@@ -323,18 +399,44 @@ func FindInterfaceRoutes(ctx context.Context, iface string) ([]string, error) {
 }
 
 func CheckSecondaryLanIp(ctx context.Context, interfaceName, primaryIP string) (bool, error) {
-	log.Default().Info("Checking if secondary LAN IP is assigned to interface:", interfaceName)
 	secondaryIP := SecondaryIPFromPrimaryIP(primaryIP)
-	existing, err := FindSecondaryNetworkIP(ctx, interfaceName)
-	if err != nil {
-		if err.Error() == "no network IP found" {
-			log.Default().Info("No secondary IP found for interface", interfaceName, "assuming it is not assigned")
-			return false, nil
-		}
-		return false, err
+	parsedSecondaryIP := net.ParseIP(secondaryIP)
+	if parsedSecondaryIP == nil {
+		return false, fmt.Errorf("invalid secondary IP format: %s", secondaryIP)
 	}
-	log.Default().Info("Found existing secondary IP:", existing, "for interface", interfaceName)
-	return existing == secondaryIP, nil
+	if parsedSecondaryIP.To4() == nil {
+		return false, fmt.Errorf("secondary IP is not an IPv4 address: %s", secondaryIP)
+	}
+	log.Default().Info("Checking if secondary LAN IP is assigned to interface:", interfaceName, "secondary IP:", secondaryIP)
+	iface, err := net.InterfaceByName(interfaceName)
+	if err != nil {
+		return false, fmt.Errorf("failed to find interface %s: %w", interfaceName, err)
+	}
+	if iface == nil {
+		return false, fmt.Errorf("interface %s not found", interfaceName)
+	}
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return false, fmt.Errorf("failed to get addresses for interface %s: %w", interfaceName, err)
+	}
+	for _, addr := range addrs {
+		log.Default().Info("Checking address for interface", interfaceName, ":", addr.String())
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok {
+			log.Default().Info("Skipping non-IP address for interface", interfaceName, ":", addr)
+			continue
+		}
+		if ipNet.IP.To4() == nil {
+			log.Default().Info("Skipping non-IPv4 address for interface", interfaceName, ":", ipNet.IP)
+			continue
+		}
+		if ipNet.Contains(parsedSecondaryIP) {
+			log.Default().Info("Found secondary IP", secondaryIP, "assigned to interface", interfaceName)
+			return true, nil
+		}
+	}
+	log.Default().Info("No addresses found for interface", interfaceName, "assuming it is not assigned")
+	return false, nil
 }
 
 func AssignSecondaryLanIp(ctx context.Context, interfaceName string, primaryIP string) error {
@@ -391,14 +493,11 @@ func SetInterfaceUp(ctx context.Context, interfaceName string) error {
 }
 
 func ExecIPCommand(ctx context.Context, args ...string) ([]byte, error) {
-	// log.Default().Info("Executing IP command:", args)
+	log.Default().Info("Executing IP command: ip", args)
 	cmd := exec.CommandContext(ctx,
 		"ip",
 		args...,
-	// append([]string{"ip"}, args...)...,
 	)
-	// cmd.Stdout = os.Stdout
-	// cmd.Stderr = os.Stderr
 	return cmd.CombinedOutput()
 }
 
