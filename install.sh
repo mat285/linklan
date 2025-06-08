@@ -12,8 +12,15 @@ which kubectl >/dev/null 2>&1 || {
     exit 1
 }
 
-ARCH=$(uname -m)
 OS=$(uname -o)
+ARCH=$(uname -m)
+if [ "$ARCH" = "x86_64" ]; then
+    ARCH="amd64"
+elif [ "$ARCH" = "aarch64" ]; then
+    ARCH="arm64"
+fi
+
+echo "Detected OS: ${OS}, Architecture: ${ARCH}"
 
 sudo systemctl stop linklandaemon.service || true
 sudo systemctl disable linklandaemon.service || true
