@@ -476,7 +476,7 @@ func AddInterfaceRoute(ctx context.Context, iface, cidr string) error {
 
 func RemoveInterfaceRoute(ctx context.Context, iface, cidr string) error {
 	log.Default().Info("Removing route", cidr, "to interface", iface)
-	_, err := ExecIPCommand(ctx, "route", "del", "dev", iface)
+	_, err := ExecIPCommand(ctx, "route", "del", cidr, "dev", iface)
 	return err
 }
 
