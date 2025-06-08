@@ -12,7 +12,7 @@ which kubectl >/dev/null 2>&1 || {
     exit 1
 }
 
-OS=$(uname -o | dd conv=lcase 2>/dev/null)
+OS=$(uname -s | dd conv=lcase 2>/dev/null)
 ARCH=$(uname -m)
 if [ "$ARCH" = "x86_64" ]; then
     ARCH="amd64"
