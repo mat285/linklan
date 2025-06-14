@@ -49,10 +49,6 @@ func main() {
 				// `sudo sh -c 'mkdir -p /etc/prometheus/node_exporter/textfile_collector'`,
 			)
 			cmd.Env = append(os.Environ(), `SUDO_OPTS="-S"`)
-			if err != nil {
-				fmt.Printf("Error creating pipe for %s: %v\n", machine, err)
-				os.Exit(1)
-			}
 			output, err := cmd.CombinedOutput()
 			lock.Lock()
 			fmt.Println(string(output))
