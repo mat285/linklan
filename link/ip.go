@@ -368,6 +368,7 @@ func IsFilteredInterface(iface net.Interface) bool {
 		"br-",
 		"tailscale0",
 		"cali", // calico
+		"w",    // wifi
 	}
 	for _, prefix := range virtualIfacePrefixes {
 		if strings.HasPrefix(iface.Name, prefix) {
@@ -438,11 +439,11 @@ func CheckSecondaryLanIp(ctx context.Context, interfaceName, primaryIP string) (
 		log.Default().Info("Checking address for interface", interfaceName, ":", addr.String())
 		ipNet, ok := addr.(*net.IPNet)
 		if !ok {
-			log.Default().Info("Skipping non-IP address for interface", interfaceName, ":", addr)
+			log.Default().Debugf("Skipping non-IP address for interface", interfaceName, ":", addr)
 			continue
 		}
 		if ipNet.IP.To4() == nil {
-			log.Default().Info("Skipping non-IPv4 address for interface", interfaceName, ":", ipNet.IP)
+			log.Default().Debugf("Skipping non-IPv4 address for interface", interfaceName, ":", ipNet.IP)
 			continue
 		}
 		if ipNet.Contains(parsedSecondaryIP) {
