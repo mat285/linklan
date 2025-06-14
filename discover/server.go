@@ -70,41 +70,44 @@ func (s *Server) SearchForPeers(ctx context.Context) error {
 			return ctx.Err() // Exit if context is done
 		default:
 		}
-		for ipID := byte(0); ipID <= byte(255); ipID++ {
-			select {
-			case <-ctx.Done():
-				return ctx.Err() // Exit if context is done
-			default:
-			}
-			s.peersLock.Lock()
-			if _, exists := s.peers[ipID]; !exists {
-				s.peers[ipID] = make(map[byte]net.Conn) // Initialize peer map if it doesn't exist
-			}
-			_, exists := s.peers[ipID][lan]
-			s.peersLock.Unlock() // Unlock peers map after checking existence
-
-			if exists {
-				log.Default().Info("Peer already exists for IP ID", ipID, "and LAN ID", lan)
-				continue // Skip to next IP ID if peer already exists
-			}
-			log.Default().Info("Trying to ping peer with IP ID", ipID, "and LAN ID", lan)
-			err := s.TryPingPeer(ctx, ipID, lan, s.Port)
-			if err != nil {
-				log.Default().Info("Failed to ping peer with IP ID", ipID, "and LAN ID", lan, ":", err)
-				continue // Skip to next IP ID if ping fails
-			}
-			log.Default().Info("Successfully pinged peer with IP ID", ipID, "and LAN ID", lan)
-			if ipID == 255 {
-				break
-			}
+		err := s.searchWholeLan(ctx, lan) // Search the whole LAN for peers
+		if err != nil {
+			log.Default().Info("Error searching LAN:", err)
 		}
 		log.Default().Info("Completed peer search cycle, waiting for next cycle")
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err() // Exit if context is done
 		case <-time.After(10 * time.Second): // Wait for 10 seconds before next search}
 		}
 	}
+}
+
+func (s *Server) searchWholeLan(ctx context.Context, lan byte) error {
+	log.Default().Info("Searching whole LAN with ID", lan)
+	for ipID := byte(0); ipID <= byte(255); ipID++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err() // Exit if context is done
+		default:
+		}
+		s.peersLock.Lock()
+		if _, exists := s.peers[ipID]; !exists {
+			s.peers[ipID] = make(map[byte]net.Conn) // Initialize peer map if it doesn't exist
+		}
+		_, exists := s.peers[ipID][lan]
+		s.peersLock.Unlock() // Unlock peers map after checking existence
+
+		if !exists {
+			log.Default().Info("Trying to ping peer with IP ID", ipID, "and LAN ID", lan)
+			err := s.TryPingPeer(ctx, ipID, lan, s.Port)
+			if err != nil {
+				log.Default().Info("Failed to ping peer with IP ID", ipID, "and LAN ID", lan, ":", err)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Server) Listen(ctx context.Context) error {
