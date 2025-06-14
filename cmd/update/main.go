@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 )
 
 var (
@@ -31,24 +32,29 @@ func main() {
 	// 	os.Exit(1)
 	// }
 
+	wg := &sync.WaitGroup{}
 	for _, machine := range machines {
-		fmt.Printf("Updating %s...\n", machine)
-		cmd := exec.Command("ssh",
-			"-A",
-			machine,
-			"-t",
-			`sh -c "$(curl -fsSL https://github.com/mat285/linklan/releases/download/`+version+`/install.sh)"`,
-			// `sudo sh -c 'mkdir -p /etc/prometheus/node_exporter/textfile_collector'`,
-		)
-		cmd.Env = append(os.Environ(), `SUDO_OPTS="-S"`)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = os.Stdin
-		if err := cmd.Run(); err != nil {
-			fmt.Printf("Error running command on %s: %v\n", machine, err)
-			os.Exit(1)
-			continue
-		}
+		wg.Add(1)
+		go func(machine string) {
+			defer wg.Done()
+			fmt.Printf("Updating %s...\n", machine)
+			cmd := exec.Command("ssh",
+				"-A",
+				machine,
+				"-t",
+				`sh -c "$(curl -fsSL https://github.com/mat285/linklan/releases/download/`+version+`/install.sh)"`,
+				// `sudo sh -c 'mkdir -p /etc/prometheus/node_exporter/textfile_collector'`,
+			)
+			cmd.Env = append(os.Environ(), `SUDO_OPTS="-S"`)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			cmd.Stdin = os.Stdin
+			if err := cmd.Run(); err != nil {
+				fmt.Printf("Error running command on %s: %v\n", machine, err)
+				os.Exit(1)
+			}
+		}(machine)
 		fmt.Printf("Successfully updated %s\n", machine)
 	}
+	wg.Wait()
 }
