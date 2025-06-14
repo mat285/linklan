@@ -207,8 +207,8 @@ func (s *Server) handlePeerConnection(ctx context.Context, conn net.Conn) {
 		}
 		curr += int64(n)
 		if curr >= 1024*1024 { // If 1 MB read
-			elapsed := time.Since(start) / time.Second     // Calculate elapsed time in seconds
-			speed := (8 * curr / int64(elapsed)) / 1000000 // Calculate speed in Mbps
+			elapsed := time.Since(start) / time.Nanosecond // Calculate elapsed time in seconds
+			speed := (8 * curr / int64(elapsed)) * 1000    // Calculate speed in Mbps
 			// speeds = append(speeds, speed)                 // Store speed
 			log.Default().Info("Read 1 MB from", remoteAddr, "at speed:", float64(speed)/1000.0, "Gb/sec")
 			curr = 0 // Reset current read count
@@ -341,8 +341,9 @@ func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 		}
 		sent += int64(n)
 		if sent >= 1024*1024 { // If 1 MB sent
-			elapsed := time.Since(start) / time.Second     // Calculate elapsed time in seconds
-			speed := (8 * sent / int64(elapsed)) / 1000000 // Calculate speed in Mbps
+			elapsed := time.Since(start) / time.Nanosecond // Calculate elapsed time in seconds
+			log.Default().Infof("Sent %d bytes to client in %dns", sent, elapsed)
+			speed := (8 * sent / int64(elapsed)) * 1000 // Calculate speed in Mbps
 			log.Default().Info("Sent 1 MB to client at speed:", float64(speed)/1000.0, "Gb/sec")
 			sent = 0          // Reset sent count
 			rand.Read(buffer) // Fill buffer with new random data
