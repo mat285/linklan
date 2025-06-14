@@ -1,4 +1,4 @@
-VERSION ?= v0.1.2
+VERSION ?= v0.2.0
 GIT_SHA ?= $(shell git log --pretty=format:'%H' -n 1 2> /dev/null | cut -c1-8)
 
 .PHONY: release
@@ -24,3 +24,4 @@ install:
 .PHONY: install-local
 install-local:
 	./install.sh ${VERSION}
+

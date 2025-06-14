@@ -4,7 +4,7 @@ set -e
 
 VERSION=$1
 if [ -z "$VERSION" ]; then
-    VERSION="v0.1.2"
+    VERSION="v0.2.0"
 fi
 
 which kubectl >/dev/null 2>&1 || {
