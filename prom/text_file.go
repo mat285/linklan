@@ -3,14 +3,17 @@ package prom
 import (
 	"os"
 	"path/filepath"
+
+	"github.com/mat285/linklan/log"
 )
 
 const (
 	TextFileDir  = "/etc/prometheus/node_exporter/textfile_collector"
-	TextFileName = "linkspeed.prometheus"
+	TextFileName = "linkspeed.prom"
 )
 
 func AppendMetric(metric string, value string, tags map[string]string) error {
+	log.Default().Info("Appending metric:", metric, "with value:", value, "and tags:", tags)
 	if len(metric) == 0 || len(value) == 0 {
 		return nil // No metric or value to write
 	}
