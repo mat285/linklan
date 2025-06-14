@@ -12,6 +12,8 @@ which kubectl >/dev/null 2>&1 || {
     exit 1
 }
 
+SUDO_OPTS=$(echo $SUDO_OPTS)
+
 OS=$(uname -s | dd conv=lcase 2>/dev/null)
 ARCH=$(uname -m)
 if [ "$ARCH" = "x86_64" ]; then
@@ -32,22 +34,22 @@ fi
 
 echo "Detected OS: ${OS}, Architecture: ${ARCH}"
 
-sudo systemctl stop linklandaemon.service || true
-sudo systemctl disable linklandaemon.service || true
+sudo $SUDO_OPTS systemctl stop linklandaemon.service || true
+sudo $SUDO_OPTS systemctl disable linklandaemon.service || true
 echo "Installing LinkLan daemon version ${VERSION}..."
 
 curl --fail-with-body -Lo linklandaemon https://github.com/mat285/linklan/releases/download/${VERSION}/linklandaemon_${OS}_${ARCH}
-sudo mv linklandaemon /bin/linklandaemon
-sudo chown root:root /bin/linklandaemon
-sudo chmod a+x /bin/linklandaemon
+sudo $SUDO_OPTS mv linklandaemon /bin/linklandaemon
+sudo $SUDO_OPTS chown root:root /bin/linklandaemon
+sudo $SUDO_OPTS chmod a+x /bin/linklandaemon
 
 curl --fail-with-body -Lo linklandaemon.service https://github.com/mat285/linklan/releases/download/${VERSION}/linklandaemon.service
-sudo mv linklandaemon.service /etc/systemd/system/linklandaemon.service
-sudo chmod 644 /etc/systemd/system/linklandaemon.service
-sudo chown root:root /etc/systemd/system/linklandaemon.service
+sudo $SUDO_OPTS mv linklandaemon.service /etc/systemd/system/linklandaemon.service
+sudo $SUDO_OPTS chmod 644 /etc/systemd/system/linklandaemon.service
+sudo $SUDO_OPTS chown root:root /etc/systemd/system/linklandaemon.service
 
-sudo systemctl daemon-reload
-sudo systemctl enable linklandaemon.service
-sudo systemctl start linklandaemon.service
+sudo $SUDO_OPTS systemctl daemon-reload
+sudo $SUDO_OPTS systemctl enable linklandaemon.service
+sudo $SUDO_OPTS systemctl start linklandaemon.service
 echo "LinkLan daemon installed and started successfully."
 

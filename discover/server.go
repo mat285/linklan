@@ -16,7 +16,8 @@ var (
 	HeloBytes   = []byte{'H', 'E', 'L', 'L', 'O', '\n'} // HELO message bytes
 	AcceptBytes = []byte{'A', 'C', 'E', 'P', 'T', '\n'} // ACCEPT message bytes
 
-	SpeedTestDataSize int64 = 64 * 1024 * 1024 // 64 GB of data for speed test
+	SpeedTestDataSize int64 = 16 * 1024 * 1024 // 64 GB of data for speed test
+	SpeedTestInterval       = 20 * time.Second // Interval for speed test
 )
 
 type Server struct {
@@ -231,7 +232,7 @@ func (s *Server) handlePeerConnection(ctx context.Context, conn net.Conn) {
 			case <-ctx.Done():
 				log.Default().Info("Context done, stopping read loop for", remoteAddr)
 				return // Exit if context is done
-			case <-time.After(5 * time.Second): // Wait for 5 seconds before next read
+			case <-time.After(SpeedTestInterval): // Wait for 5 seconds before next read
 				log.Default().Info("Waiting for next read from", remoteAddr)
 			}
 			curr = 0           // Reset current read count
@@ -363,7 +364,7 @@ func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 			case <-ctx.Done():
 				log.Default().Info("Context done, stopping client connection handling")
 				return // Exit if context is done
-			case <-time.After(5 * time.Second): // Wait for 5 seconds before next send
+			case <-time.After(SpeedTestInterval): // Wait for 5 seconds before next send
 				log.Default().Info("Waiting for next send to client")
 			}
 
