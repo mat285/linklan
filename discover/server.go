@@ -16,8 +16,9 @@ var (
 	HeloBytes   = []byte{'H', 'E', 'L', 'L', 'O', '\n'} // HELO message bytes
 	AcceptBytes = []byte{'A', 'C', 'E', 'P', 'T', '\n'} // ACCEPT message bytes
 
-	SpeedTestDataSize int64 = 16 * 1024 * 1024 // 16 MB of data for speed test
-	SpeedTestInterval       = 10 * time.Second // Interval for speed test
+	SpeedTestDataSize   int64 = 16 * 1024 * 1024 // 16 MB of data for speed test
+	SpeedTestInterval         = 10 * time.Second // Interval for speed test
+	SpeedTestBufferSize       = 1024 * 1024      // 1 MB buffer size for speed test
 )
 
 type Server struct {
@@ -204,41 +205,47 @@ func (s *Server) handlePeerConnection(ctx context.Context, conn net.Conn) {
 	}
 	s.peersLock.Unlock()
 
-	buffer := make([]byte, 1024)
-	// speeds := make([]int64, 0) // Slice to store read speeds
-	curr := int64(0)
-	start := time.Now()
-	for {
-		select {
-		case <-ctx.Done():
-			return // Exit if context is done
-		default:
-		}
+	runSpeedTest(
+		ctx,
+		conn,
+		nil,
+		conn.Read,
+	)
+	// buffer := make([]byte, SpeedTestBufferSize)
+	// // speeds := make([]int64, 0) // Slice to store read speeds
+	// curr := int64(0)
+	// start := time.Now()
+	// for {
+	// 	select {
+	// 	case <-ctx.Done():
+	// 		return // Exit if context is done
+	// 	default:
+	// 	}
 
-		n, err := conn.Read(buffer) // Read data from the connection
-		if err != nil {
-			log.Default().Info("Error reading from connection:", err)
-			break // Exit on read error
-		}
-		if n == 0 {
-			log.Default().Info("Connection closed by peer:", remoteAddr)
-			break // Exit if no data read
-		}
-		curr += int64(n)
-		if curr >= SpeedTestDataSize { // If 1 MB read
-			speed, mb := calculateSpeed(curr, start) // Calculate speed
-			log.Default().Infof("Calculated speed of connection with %s: %f Gbps with %d MB of data", remoteAddr.String(), speed, mb)
-			select {
-			case <-ctx.Done():
-				log.Default().Info("Context done, stopping read loop for", remoteAddr)
-				return // Exit if context is done
-			case <-time.After(SpeedTestInterval): // Wait for 5 seconds before next read
-				log.Default().Info("Waiting for next read from", remoteAddr)
-			}
-			curr = 0           // Reset current read count
-			start = time.Now() // Reset start time
-		}
-	}
+	// 	n, err := conn.Read(buffer) // Read data from the connection
+	// 	if err != nil {
+	// 		log.Default().Info("Error reading from connection:", err)
+	// 		break // Exit on read error
+	// 	}
+	// 	if n == 0 {
+	// 		log.Default().Info("Connection closed by peer:", remoteAddr)
+	// 		break // Exit if no data read
+	// 	}
+	// 	curr += int64(n)
+	// 	if curr >= SpeedTestDataSize { // If 1 MB read
+	// 		speed, mb := calculateSpeed(curr, start) // Calculate speed
+	// 		log.Default().Infof("Calculated speed of connection with %s: %f Gbps with %d MB of data", remoteAddr.String(), speed, mb)
+	// 		select {
+	// 		case <-ctx.Done():
+	// 			log.Default().Info("Context done, stopping read loop for", remoteAddr)
+	// 			return // Exit if context is done
+	// 		case <-time.After(SpeedTestInterval): // Wait for 5 seconds before next read
+	// 			log.Default().Info("Waiting for next read from", remoteAddr)
+	// 		}
+	// 		curr = 0           // Reset current read count
+	// 		start = time.Now() // Reset start time
+	// 	}
+	// }
 }
 
 func (s *Server) Stop() {
@@ -322,17 +329,70 @@ func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 	}()
 
 	log.Default().Info("Handling client connection from", conn.RemoteAddr())
-	// Read and process client messages here
-	// For now, just echo back the HELO message
-	buffer := make([]byte, 1024)
-	n, err := rand.Read(buffer) // Fill buffer with random data for demonstration
-	if err != nil {
-		log.Default().Info("Error reading random data:", err)
-		return
-	}
-	if n == 0 {
-		log.Default().Info("No data read from random source, closing connection")
-		return // Exit if no data read
+	runSpeedTest(
+		ctx,
+		conn,
+		rand.Read, // Pre function to fill buffer with random data
+		conn.Write,
+	)
+	// // Read and process client messages here
+	// // For now, just echo back the HELO message
+	// buffer := make([]byte, 1024)
+	// n, err := rand.Read(buffer) // Fill buffer with random data for demonstration
+	// if err != nil {
+	// 	log.Default().Info("Error reading random data:", err)
+	// 	return
+	// }
+	// if n == 0 {
+	// 	log.Default().Info("No data read from random source, closing connection")
+	// 	return // Exit if no data read
+	// }
+
+	// sent := int64(0) // Track bytes sent
+	// start := time.Now()
+
+	// for {
+	// 	select {
+	// 	case <-ctx.Done():
+	// 		// reconnect = false
+	// 		return // Exit if context is done
+	// 	default:
+	// 	}
+
+	// 	n, err = conn.Write(buffer)
+	// 	if err != nil {
+	// 		log.Default().Info("Error writing to client:", err)
+	// 		return
+	// 	}
+	// 	sent += int64(n)
+	// 	if sent >= SpeedTestDataSize { // If 1 MB sent
+	// 		speed, mb := calculateSpeed(sent, start) // Calculate speed
+	// 		log.Default().Infof("Calculated speed of connection with %s: %f Gbps with %d MB of data", ip.String(), speed, mb)
+	// 		select {
+	// 		case <-ctx.Done():
+	// 			log.Default().Info("Context done, stopping client connection handling")
+	// 			return // Exit if context is done
+	// 		case <-time.After(SpeedTestInterval): // Wait for 5 seconds before next send
+	// 			log.Default().Info("Waiting for next send to client")
+	// 		}
+
+	// 		sent = 0          // Reset sent count
+	// 		rand.Read(buffer) // Fill buffer with new random data
+
+	// 		start = time.Now() // Reset start time
+	// 	}
+	// }
+}
+
+func runSpeedTest(ctx context.Context, conn net.Conn, pre func([]byte) (int, error), move func([]byte) (int, error)) {
+	ip := addressToIP(conn.RemoteAddr().String()) // Convert remote address to IP
+	buffer := make([]byte, SpeedTestBufferSize)   // Buffer for speed test
+	if pre != nil {
+		_, err := pre(buffer) // Call pre function if provided
+		if err != nil {
+			log.Default().Info("Error in pre function:", err)
+			return
+		}
 	}
 
 	sent := int64(0) // Track bytes sent
@@ -341,12 +401,11 @@ func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 	for {
 		select {
 		case <-ctx.Done():
-			// reconnect = false
-			return // Exit if context is done
+			return
 		default:
 		}
 
-		n, err = conn.Write(buffer)
+		n, err := move(buffer)
 		if err != nil {
 			log.Default().Info("Error writing to client:", err)
 			return
@@ -363,9 +422,10 @@ func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 				log.Default().Info("Waiting for next send to client")
 			}
 
-			sent = 0          // Reset sent count
-			rand.Read(buffer) // Fill buffer with new random data
-
+			sent = 0 // Reset sent count
+			if pre != nil {
+				pre(buffer) // Fill buffer with new random data
+			}
 			start = time.Now() // Reset start time
 		}
 	}
