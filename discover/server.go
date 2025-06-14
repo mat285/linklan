@@ -341,10 +341,9 @@ func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 		}
 		sent += int64(n)
 		if sent >= 4*1024*1024*1024 { // If 1 MB sent
-			elapsed := time.Since(start) / time.Nanosecond // Calculate elapsed time in seconds
-			log.Default().Infof("Sent %d bytes to client in %dns", sent, elapsed)
-			speed := (8 * sent / int64(elapsed)) * 1000 // Calculate speed in Mbps
-			log.Default().Info("Sent 1 MB to client at speed:", float64(speed)/1000.0, "Gb/sec")
+			elapsed := time.Since(start)           // Calculate elapsed time in seconds
+			speed := calculateSpeed(sent, elapsed) // Calculate speed
+			log.Default().Infof("Sent %d bytes to client at speed: %.2f Gbps", sent, speed)
 			sent = 0          // Reset sent count
 			rand.Read(buffer) // Fill buffer with new random data
 
@@ -359,6 +358,17 @@ func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 			start = time.Now() // Reset start time
 		}
 	}
+}
+
+func calculateSpeed(sent int64, elapsed time.Duration) float64 {
+	sent = sent * 8 // Convert bytes to bits
+	elapsed = elapsed / time.Nanosecond
+	// log.Default().Infof("Sent %d bytes to client in %dns", sent, elapsed)
+	if elapsed == 0 {
+		return 0 // Avoid division by zero
+	}
+	speed := (1000 * float64(sent) / float64(elapsed))
+	return speed
 }
 
 func addressToIP(addr string) net.IP {
