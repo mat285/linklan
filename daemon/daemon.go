@@ -16,8 +16,8 @@ import (
 const (
 	MaxInitAttempts  = 10
 	InitRetryDelay   = 5 * time.Second
-	SyncInterval     = 30 * time.Second
-	PeerSyncInterval = 5 * time.Second
+	SyncInterval     = 10 * time.Second
+	PeerSyncInterval = 2 * time.Second
 )
 
 type Daemon struct {

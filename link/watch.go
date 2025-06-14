@@ -14,6 +14,8 @@ import (
 const (
 	NetworkDeviceDirectory = "/sys/class/net"
 
+	InterfaceSyncInterval = 500 * time.Millisecond
+
 	ModeUnknown EventMode = 0 // Unknown mode
 	ModeCreate  EventMode = 1
 	ModeRemove  EventMode = 2
@@ -101,7 +103,7 @@ func (dw *DeviceWatcher) watchDeviceChanges(ctx context.Context, watcher *fsnoti
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(InterfaceSyncInterval):
 			continue
 		}
 	}
