@@ -1,6 +1,10 @@
 VERSION ?= v0.2.0
 GIT_SHA ?= $(shell git log --pretty=format:'%H' -n 1 2> /dev/null | cut -c1-8)
 
+.PHONY: release-all
+release-all: release
+	VERSION=${VERSION} go run cmd/update/main.go
+
 .PHONY: release
 release: build push-files
 

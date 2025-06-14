@@ -339,10 +339,15 @@ func (s *Server) runSpeedTest(ctx context.Context, conn net.Conn, pre func([]byt
 		if sent >= SpeedTestDataSize { // If 1 MB sent
 			speed, mb := calculateSpeed(sent, start) // Calculate speed
 			log.Default().Infof("Calculated speed of connection with %s: %f Gbps with %d MB of data", ip.String(), speed, mb)
-			err = prom.AppendMetric(MetricName, fmt.Sprintf("%0.4f", speed), map[string]string{
-				"host":   localIP.String(),
-				"remote": rIP.String(),
-			})
+			err = prom.AppendMetric(
+				MetricName,
+				fmt.Sprintf("%0.4f", speed),
+				time.Now(),
+				map[string]string{
+					"host":   localIP.String(),
+					"remote": rIP.String(),
+				},
+			)
 			if err != nil {
 				log.Default().Info("Error appending metric:", err)
 			}

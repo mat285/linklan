@@ -37,8 +37,8 @@ func main() {
 			"-A",
 			machine,
 			"-t",
-			// `sh -c "$(curl -fsSL https://github.com/mat285/linklan/releases/download/`+version+`/install.sh)"`,
-			`sudo sh -c 'mkdir -p /etc/prometheus/node_exporter/textfile_collector'`,
+			`sh -c "$(curl -fsSL https://github.com/mat285/linklan/releases/download/`+version+`/install.sh)"`,
+			// `sudo sh -c 'mkdir -p /etc/prometheus/node_exporter/textfile_collector'`,
 		)
 		cmd.Env = append(os.Environ(), `SUDO_OPTS="-S"`)
 		cmd.Stdout = os.Stdout

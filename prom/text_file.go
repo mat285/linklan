@@ -1,8 +1,10 @@
 package prom
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/mat285/linklan/log"
 )
@@ -12,7 +14,7 @@ const (
 	TextFileName = "linkspeed.prom"
 )
 
-func AppendMetric(metric string, value string, tags map[string]string) error {
+func AppendMetric(metric string, value string, ts time.Time, tags map[string]string) error {
 	log.Default().Info("Appending metric:", metric, "with value:", value, "and tags:", tags)
 	if len(metric) == 0 || len(value) == 0 {
 		return nil // No metric or value to write
@@ -21,7 +23,11 @@ func AppendMetric(metric string, value string, tags map[string]string) error {
 	if len(tags) > 0 {
 		str += "{" + FormatTags(tags) + "}"
 	}
-	str += " " + value + "\n"
+	str += " " + value
+	if !ts.IsZero() {
+		str += " " + fmt.Sprintf("%d", ts.UTC().Unix())
+	}
+	str += "\n"
 	file, err := os.OpenFile(filepath.Join(TextFileDir, TextFileName), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
