@@ -104,7 +104,7 @@ func (s *Server) searchWholeLan(ctx context.Context, lan byte) error {
 			log.Default().Info("Trying to ping peer with IP ID", ipID, "and LAN ID", lan)
 			err := s.TryPingPeer(ctx, ipID, lan, s.Port)
 			if err != nil {
-				log.Default().Info("Failed to ping peer with IP ID", ipID, "and LAN ID", lan, ":", err)
+				log.Default().Debug("Failed to ping peer with IP ID", ipID, "and LAN ID", lan, ":", err)
 			}
 		}
 	}
@@ -134,6 +134,13 @@ func (s *Server) Listen(ctx context.Context) error {
 }
 
 func (s *Server) handlePeerConnection(ctx context.Context, conn net.Conn) {
+	localIP := net.ParseIP(conn.LocalAddr().String())
+	if localIP.String() != s.IP {
+		log.Default().Info("Connection from unexpected IP:", localIP, ", expected:", s.IP)
+		conn.Close() // Close connection if IP does not match
+		return
+	}
+	log.Default().Info("New connection from peer:", conn.RemoteAddr())
 	intro := make([]byte, 5)
 	r, err := conn.Read(intro)
 	if err != nil {
@@ -235,12 +242,12 @@ func (s *Server) Stop() {
 func (s *Server) TryPingPeer(ctx context.Context, ipID, lanID byte, port int) error {
 	ip := net.ParseIP(s.IP)
 	ip[len(ip)-1] = ipID // Set the last byte to the provided value
-	log.Default().Info("Pinging peer at", ip, "on port", port)
+	log.Default().Debug("Pinging peer at", ip, "on port", port)
 	addr := net.JoinHostPort(ip.String(), fmt.Sprintf("%d", port))
 	ip[len(ip)-2] = lanID
 	conn, err := net.DialTimeout("tcp4", addr, 10*time.Millisecond)
 	if err != nil {
-		log.Default().Info("Failed to connect to", addr, ":", err)
+		log.Default().Debug("Failed to connect to", addr, ":", err)
 		return err
 	}
 	r, err := conn.Write(HeloBytes) // Send HELO message
