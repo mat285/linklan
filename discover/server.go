@@ -63,6 +63,22 @@ func (s *Server) Start(ctx context.Context) error {
 	return err
 }
 
+func (s *Server) ActivePeers() []string {
+	s.peersLock.Lock()
+	defer s.peersLock.Unlock()
+	ip := net.ParseIP(s.IP)
+	ip[len(ip)-2] = 1
+	peers := make([]string, 0, len(s.peers))
+	for ipID, lanMap := range s.peers {
+		for range lanMap {
+			ip[len(ip)-1] = ipID // Set the last byte to the IP ID
+			peer := ip.String()
+			peers = append(peers, fmt.Sprintf("%s:%d", peer, s.Port)) // Append peer address with port
+		}
+	}
+	return peers
+}
+
 func (s *Server) SearchForPeers(ctx context.Context) error {
 	lan := byte(0)
 	log.Default().Info("Starting peer search on LAN ID", lan)
@@ -209,7 +225,8 @@ func (s *Server) handlePeerConnection(ctx context.Context, conn net.Conn) {
 		}
 		curr += int64(n)
 		if curr >= SpeedTestDataSize { // If 1 MB read
-			calculateSpeed(curr, start) // Calculate speed
+			speed, mb := calculateSpeed(curr, start) // Calculate speed
+			log.Default().Infof("Calculated speed of connection with %s: %f Gbps with %d MB of data", remoteAddr.String(), speed, mb)
 			select {
 			case <-ctx.Done():
 				log.Default().Info("Context done, stopping read loop for", remoteAddr)
@@ -340,8 +357,8 @@ func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 		}
 		sent += int64(n)
 		if sent >= SpeedTestDataSize { // If 1 MB sent
-			calculateSpeed(sent, start) // Calculate speed
-
+			speed, mb := calculateSpeed(sent, start) // Calculate speed
+			log.Default().Infof("Calculated speed of connection with %s: %f Gbps with %d MB of data", ip.String(), speed, mb)
 			select {
 			case <-ctx.Done():
 				log.Default().Info("Context done, stopping client connection handling")
@@ -358,16 +375,16 @@ func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 	}
 }
 
-func calculateSpeed(sent int64, start time.Time) float64 {
+func calculateSpeed(sent int64, start time.Time) (float64, int64) {
 	elapsed := time.Since(start) / time.Nanosecond
-	sent = sent * 8 // Convert bytes to bits
+	sent = sent * 8                    // Convert bytes to bits
+	sentMB := sent / (8 * 1024 * 1024) // Convert bits to MB
 	// log.Default().Infof("Sent %d bytes to client in %dns", sent, elapsed)
 	if elapsed == 0 {
-		return 0 // Avoid division by zero
+		return 0, sentMB // Avoid division by zero
 	}
 	speed := (float64(sent) / float64(elapsed))
-	log.Default().Infof("Calculated speed: %f Gbps with %d MB of data", speed, sent/(8*1024*1024))
-	return speed
+	return speed, sentMB
 }
 
 func addressToIP(addr string) net.IP {

@@ -169,10 +169,11 @@ func (d *Daemon) syncPeers(ctx context.Context) (bool, error) {
 	defer d.lock.Unlock()
 	d.Log.Info("Running peer sync")
 	d.Log.Info("Current Peers:", d.Peers)
-	peers, err := discover.GetActiveKubePeers(ctx, d.LocalIP)
-	if err != nil {
-		return false, err
-	}
+	// peers, err := discover.GetActiveKubePeers(ctx, d.LocalIP)
+	// if err != nil {
+	// 	return false, err
+	// }
+	peers := d.Server.ActivePeers()
 	sort.Strings(peers)
 
 	needsSync := len(peers) != len(d.Peers)
