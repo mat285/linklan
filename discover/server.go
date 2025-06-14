@@ -275,7 +275,7 @@ func (s *Server) TryPingPeer(ctx context.Context, ipID, lanID byte, port int) er
 }
 
 func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
-	reconnect := true  // Flag to indicate if we should try to reconnect
+	reconnect := false // Flag to indicate if we should try to reconnect
 	defer conn.Close() // Ensure connection is closed when done
 	ip := net.ParseIP(conn.RemoteAddr().String())
 	ipID := ip[len(ip)-1]  // Get the last byte as IP ID
@@ -297,9 +297,9 @@ func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 		}
 		s.peersLock.Unlock()
 
-		if reconnect {
-			s.TryPingPeer(ctx, ipID, lanID, s.Port) // Try to ping the peer again
-		}
+		// if reconnect {
+		// 	s.TryPingPeer(ctx, ipID, lanID, s.Port) // Try to ping the peer again
+		// }
 	}()
 
 	log.Default().Info("Handling client connection from", conn.RemoteAddr())
