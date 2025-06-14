@@ -139,6 +139,7 @@ func (s *Server) Listen(ctx context.Context) error {
 }
 
 func (s *Server) handlePeerConnection(ctx context.Context, conn net.Conn) {
+	log.Default().Info("Handling new peer connection from", conn.RemoteAddr())
 	intro := make([]byte, len(HeloBytes))
 	r, err := conn.Read(intro)
 	if err != nil {
