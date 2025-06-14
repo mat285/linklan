@@ -79,7 +79,7 @@ func (s *Server) SearchForPeers(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err() // Exit if context is done
-		case <-time.After(10 * time.Second): // Wait for 10 seconds before next search}
+		case <-time.After(30 * time.Second): // Wait for 10 seconds before next search}
 		}
 	}
 }
@@ -206,7 +206,7 @@ func (s *Server) handlePeerConnection(ctx context.Context, conn net.Conn) {
 			break // Exit if no data read
 		}
 		curr += int64(n)
-		if curr >= 1024*1024 { // If 1 MB read
+		if curr >= 4*1024*1024*1024 { // If 1 MB read
 			elapsed := time.Since(start) / time.Nanosecond // Calculate elapsed time in seconds
 			speed := (8 * curr / int64(elapsed)) * 1000    // Calculate speed in Mbps
 			// speeds = append(speeds, speed)                 // Store speed
@@ -340,7 +340,7 @@ func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 			return
 		}
 		sent += int64(n)
-		if sent >= 1024*1024 { // If 1 MB sent
+		if sent >= 4*1024*1024*1024 { // If 1 MB sent
 			elapsed := time.Since(start) / time.Nanosecond // Calculate elapsed time in seconds
 			log.Default().Infof("Sent %d bytes to client in %dns", sent, elapsed)
 			speed := (8 * sent / int64(elapsed)) * 1000 // Calculate speed in Mbps
