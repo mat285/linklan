@@ -230,7 +230,7 @@ func (s *Server) TryPingPeer(ctx context.Context, ipID, lanID byte, port int) er
 	ip := net.ParseIP(s.IP)
 	ip[len(ip)-1] = ipID // Set the last byte to the provided value
 	log.Default().Info("Pinging peer at", ip, "on port", port)
-	addr := net.JoinHostPort(string(ip), fmt.Sprintf("%d", port))
+	addr := net.JoinHostPort(ip.String(), fmt.Sprintf("%d", port))
 	ip[len(ip)-2] = lanID
 	conn, err := net.DialTimeout("tcp4", addr, 10*time.Millisecond)
 	if err != nil {
