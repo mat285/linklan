@@ -108,7 +108,7 @@ func (s *Server) SearchForPeers(ctx context.Context) error {
 func (s *Server) Listen(ctx context.Context) error {
 	// Placeholder for server listen logic
 	// This would typically start a TCP server on s.Port
-	listener, err := net.Listen("tcp", net.JoinHostPort(s.IP, string(s.Port)))
+	listener, err := net.Listen("tcp", net.JoinHostPort(s.IP, fmt.Sprintf("%d", s.Port)))
 	if err != nil {
 		return err
 	}
