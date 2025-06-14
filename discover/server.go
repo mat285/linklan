@@ -139,14 +139,14 @@ func (s *Server) Listen(ctx context.Context) error {
 }
 
 func (s *Server) handlePeerConnection(ctx context.Context, conn net.Conn) {
-	intro := make([]byte, 5)
+	intro := make([]byte, len(HeloBytes))
 	r, err := conn.Read(intro)
 	if err != nil {
 		log.Default().Info("Error reading from connection:", err)
 		conn.Close() // Close connection on error
 		return
 	}
-	if r != 5 || !bytes.Equal(intro, HeloBytes) {
+	if r != len(HeloBytes) || !bytes.Equal(intro, HeloBytes) {
 		log.Default().Info("Invalid HELO message from peer, closing connection")
 		conn.Close() // Close connection if HELO message is invalid
 		return
