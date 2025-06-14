@@ -24,6 +24,8 @@ type Daemon struct {
 	lock   sync.Mutex
 	cancel context.CancelFunc
 
+	lastSync time.Time
+
 	Log *log.Logger
 
 	LocalIP string
@@ -119,6 +121,10 @@ func (d *Daemon) init(ctx context.Context) error {
 }
 
 func (d *Daemon) runSync(ctx context.Context) error {
+	if d.lastSync.Add(SyncInterval).After(time.Now()) {
+		d.Log.Info("Skipping sync, last sync was too recent")
+		return nil
+	}
 	synced, err := d.syncPeers(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to sync peers: %w", err)
@@ -126,13 +132,21 @@ func (d *Daemon) runSync(ctx context.Context) error {
 	if synced {
 		return nil
 	}
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	return d.ensureLan(ctx)
 }
 
 func (d *Daemon) ensureLan(ctx context.Context) error {
 	peers := d.Peers
 	log.Default().Info("Ensuring direct LAN connection with peers:", peers)
-	return link.EnsureDirectLan(ctx, peers)
+	err := link.EnsureDirectLan(ctx, peers)
+	if err != nil {
+		return fmt.Errorf("failed to ensure direct LAN connection: %w", err)
+	}
+	d.Log.Info("Direct LAN connection established successfully")
+	d.lastSync = time.Now()
+	return nil
 }
 
 func (d *Daemon) syncPeers(ctx context.Context) (bool, error) {
@@ -180,6 +194,5 @@ func (d *Daemon) onInterfaceChange(ctx context.Context, iface net.Interface, mod
 		log.Default().Info("Interface", iface.Name, "is not a secondary network interface, skipping")
 		return nil
 	}
-
 	return d.ensureLan(ctx)
 }

@@ -298,7 +298,7 @@ func FindPhysicalInterfaces() (primary *net.Interface, filtered []net.Interface,
 			primary = prime
 		}
 		if !valid {
-			log.Default().Info("Skipping interface:", iface.Name)
+			log.Default().Debugf("Skipping interface:", iface.Name)
 			continue
 		}
 		filtered = append(filtered, iface)
@@ -311,11 +311,11 @@ func FindPhysicalInterfaces() (primary *net.Interface, filtered []net.Interface,
 
 func IsSecondaryNetworkInterface(iface net.Interface) (bool, *net.Interface, error) {
 	if iface.Flags&net.FlagLoopback != 0 {
-		log.Default().Info("Skipping loopback interface:", iface.Name)
+		log.Default().Debugf("Skipping loopback interface:", iface.Name)
 		return false, nil, nil
 	}
 	if IsFilteredInterface(iface) {
-		log.Default().Info("Skipping known virtual interface:", iface.Name)
+		log.Default().Debugf("Skipping known virtual interface:", iface.Name)
 		return false, nil, nil
 	}
 	isHardware, err := IsHardwareInterface(iface)
@@ -324,7 +324,7 @@ func IsSecondaryNetworkInterface(iface net.Interface) (bool, *net.Interface, err
 		return false, nil, err
 	}
 	if !isHardware {
-		log.Default().Info("Skipping non-hardware interface:", iface.Name)
+		log.Default().Debugf("Skipping non-hardware interface:", iface.Name)
 		return false, nil, nil
 	}
 	addrs, err := iface.Addrs()
@@ -371,7 +371,7 @@ func IsFilteredInterface(iface net.Interface) bool {
 	}
 	for _, prefix := range virtualIfacePrefixes {
 		if strings.HasPrefix(iface.Name, prefix) {
-			log.Default().Info("Skipping known virtual interface:", iface.Name)
+			log.Default().Debugf("Skipping known virtual interface:", iface.Name)
 			return true
 		}
 	}

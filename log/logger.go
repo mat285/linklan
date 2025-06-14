@@ -44,3 +44,7 @@ func (l *Logger) Errorf(format string, args ...any) {
 func (l *Logger) Warnf(format string, args ...any) {
 	l.Logger.Warn(fmt.Sprintf(format, args...))
 }
+
+func (l *Logger) Debugf(format string, args ...any) {
+	l.Logger.Debug(fmt.Sprintf(format, args...))
+}
