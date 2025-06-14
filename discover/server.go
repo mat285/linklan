@@ -73,7 +73,7 @@ func (s *Server) ActivePeers() []string {
 		for range lanMap {
 			ip[len(ip)-1] = ipID // Set the last byte to the IP ID
 			peer := ip.String()
-			peers = append(peers, fmt.Sprintf("%s:%d", peer, s.Port)) // Append peer address with port
+			peers = append(peers, peer) // Append peer address with port
 		}
 	}
 	return peers
