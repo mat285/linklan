@@ -168,7 +168,7 @@ func (s *Server) handlePeerConnection(ctx context.Context, conn net.Conn) {
 	log.Default().Info("Sent ACCEPT message to peer, processing connection")
 	s.peersLock.Lock()
 
-	remoteAddr := net.ParseIP(conn.RemoteAddr().String())
+	remoteAddr := addressToIP(conn.RemoteAddr().String()) // Convert remote address to IP
 	ipID := remoteAddr[len(remoteAddr)-1]
 	lanID := remoteAddr[len(remoteAddr)-2]
 	if _, exists := s.peers[ipID]; !exists {
@@ -283,10 +283,10 @@ func (s *Server) TryPingPeer(ctx context.Context, ipID, lanID byte, port int) er
 
 func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 	// reconnect := false // Flag to indicate if we should try to reconnect
-	defer conn.Close() // Ensure connection is closed when done
-	ip := net.ParseIP(conn.RemoteAddr().String())
-	ipID := ip[len(ip)-1]  // Get the last byte as IP ID
-	lanID := ip[len(ip)-2] // Get the second last byte as LAN ID
+	defer conn.Close()                            // Ensure connection is closed when done
+	ip := addressToIP(conn.RemoteAddr().String()) // Convert remote address to IP
+	ipID := ip[len(ip)-1]                         // Get the last byte as IP ID
+	lanID := ip[len(ip)-2]                        // Get the second last byte as LAN ID
 
 	s.peersLock.Lock()
 	if s.peers[ipID] == nil {
@@ -358,4 +358,10 @@ func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 			start = time.Now() // Reset start time
 		}
 	}
+}
+
+func addressToIP(addr string) net.IP {
+	host, _, _ := net.SplitHostPort(addr)
+	ip := net.ParseIP(host)
+	return ip
 }
