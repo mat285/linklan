@@ -134,10 +134,10 @@ func (d *Daemon) runSync(ctx context.Context) error {
 	}
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	return d.ensureLan(ctx)
+	return d.ensureLanUnsafe(ctx)
 }
 
-func (d *Daemon) ensureLan(ctx context.Context) error {
+func (d *Daemon) ensureLanUnsafe(ctx context.Context) error {
 	peers := d.Peers
 	log.Default().Info("Ensuring direct LAN connection with peers:", peers)
 	err := link.EnsureDirectLan(ctx, peers)
@@ -158,6 +158,7 @@ func (d *Daemon) syncPeers(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	sort.Strings(peers)
 
 	needsSync := len(peers) != len(d.Peers)
 	if !needsSync {
@@ -166,17 +167,17 @@ func (d *Daemon) syncPeers(ctx context.Context) (bool, error) {
 			if d.Peers[i] != peer {
 				needsSync = true
 				break
-				d.Log.Info("Peer change detected, re-syncing LAN setup")
 			}
 		}
 	}
+	d.Peers = peers
 
 	if !needsSync {
 		d.Log.Info("No peer changes detected, skipping LAN setup")
 		return false, nil
 	}
 	d.Log.Info("Peer changes detected, re-syncing LAN setup")
-	return true, d.ensureLan(ctx)
+	return true, d.ensureLanUnsafe(ctx)
 }
 
 func (d *Daemon) onInterfaceChange(ctx context.Context, iface net.Interface, mode link.EventMode) error {
@@ -194,5 +195,5 @@ func (d *Daemon) onInterfaceChange(ctx context.Context, iface net.Interface, mod
 		log.Default().Info("Interface", iface.Name, "is not a secondary network interface, skipping")
 		return nil
 	}
-	return d.ensureLan(ctx)
+	return d.ensureLanUnsafe(ctx)
 }
