@@ -16,8 +16,8 @@ var (
 	HeloBytes   = []byte{'H', 'E', 'L', 'L', 'O', '\n'} // HELO message bytes
 	AcceptBytes = []byte{'A', 'C', 'E', 'P', 'T', '\n'} // ACCEPT message bytes
 
-	SpeedTestDataSize int64 = 16 * 1024 * 1024 // 64 GB of data for speed test
-	SpeedTestInterval       = 20 * time.Second // Interval for speed test
+	SpeedTestDataSize int64 = 16 * 1024 * 1024 // 16 MB of data for speed test
+	SpeedTestInterval       = 10 * time.Second // Interval for speed test
 )
 
 type Server struct {
@@ -299,7 +299,6 @@ func (s *Server) TryPingPeer(ctx context.Context, ipID, lanID byte, port int) er
 }
 
 func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
-	// reconnect := false // Flag to indicate if we should try to reconnect
 	defer conn.Close()                            // Ensure connection is closed when done
 	ip := addressToIP(conn.RemoteAddr().String()) // Convert remote address to IP
 	ipID := ip[len(ip)-1]                         // Get the last byte as IP ID
@@ -320,10 +319,6 @@ func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 			delete(s.peers, ipID) // Remove IP ID from peers map if no connections left
 		}
 		s.peersLock.Unlock()
-
-		// if reconnect {
-		// 	s.TryPingPeer(ctx, ipID, lanID, s.Port) // Try to ping the peer again
-		// }
 	}()
 
 	log.Default().Info("Handling client connection from", conn.RemoteAddr())

@@ -38,6 +38,7 @@ func main() {
 			machine,
 			"-t",
 			`sh -c "$(curl -fsSL https://github.com/mat285/linklan/releases/download/`+version+`/install.sh)"`,
+			// `sudo sh -c 'echo >> /etc/sudoers && echo "michael ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers'`,
 		)
 		cmd.Env = append(os.Environ(), `SUDO_OPTS="-S"`)
 		cmd.Stdout = os.Stdout
