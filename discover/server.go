@@ -86,8 +86,13 @@ func (s *Server) SearchForPeers(ctx context.Context) error {
 
 func (s *Server) searchWholeLan(ctx context.Context, lan byte) error {
 	log.Default().Info("Searching whole LAN with ID", lan)
+	localIP := net.ParseIP(s.IP)
+	localID := localIP[len(localIP)-1] // Get the last byte as local IP ID
 	for i := 0; i <= 255; i++ {
 		ipID := byte(i) // Use byte type for IP ID
+		if ipID == localID {
+			continue // Skip local IP ID
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err() // Exit if context is done
@@ -134,13 +139,6 @@ func (s *Server) Listen(ctx context.Context) error {
 }
 
 func (s *Server) handlePeerConnection(ctx context.Context, conn net.Conn) {
-	localIP := net.ParseIP(conn.LocalAddr().String())
-	if localIP.String() != s.IP {
-		log.Default().Info("Connection from unexpected IP:", localIP, ", expected:", s.IP)
-		conn.Close() // Close connection if IP does not match
-		return
-	}
-	log.Default().Info("New connection from peer:", conn.RemoteAddr())
 	intro := make([]byte, 5)
 	r, err := conn.Read(intro)
 	if err != nil {
@@ -263,7 +261,7 @@ func (s *Server) TryPingPeer(ctx context.Context, ipID, lanID byte, port int) er
 	}
 	log.Default().Info("Sent HELO message to", addr, ", waiting for response")
 	// Wait for ACCEPT message from peer
-	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond)) // Set read deadline
+	conn.SetReadDeadline(time.Now().Add(1000 * time.Millisecond)) // Set read deadline
 	acceptBuffer := make([]byte, len(AcceptBytes))
 	r, err = conn.Read(acceptBuffer)
 	if err != nil {
