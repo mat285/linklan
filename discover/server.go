@@ -94,13 +94,15 @@ func (s *Server) SearchForPeers(ctx context.Context) error {
 				continue // Skip to next IP ID if ping fails
 			}
 			log.Default().Info("Successfully pinged peer with IP ID", ipID, "and LAN ID", lan)
+			if ipID == 255 {
+				break
+			}
 		}
+		log.Default().Info("Completed peer search cycle, waiting for next cycle")
 		select {
 		case <-ctx.Done():
 			return ctx.Err() // Exit if context is done
 		case <-time.After(10 * time.Second): // Wait for 10 seconds before next search}
-			log.Default().Info("Waiting for next peer search cycle")
-			continue // Continue to next search cycle
 		}
 	}
 }
