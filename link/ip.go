@@ -339,7 +339,7 @@ func IsSecondaryNetworkInterface(iface net.Interface) (bool, *net.Interface, err
 		}
 	}
 	log.Default().Info("Including hardware interface:", iface.Name)
-	return true, nil // This is a secondary interface
+	return true, nil, nil // This is a secondary interface
 }
 
 func IsHardwareInterface(iface net.Interface) (bool, error) {

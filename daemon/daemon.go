@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sort"
 	"sync"
 	"time"
 
@@ -13,9 +14,10 @@ import (
 )
 
 const (
-	MaxInitAttempts = 10
-	InitRetryDelay  = 5 * time.Second
-	SyncInterval    = 10 * time.Second
+	MaxInitAttempts  = 10
+	InitRetryDelay   = 5 * time.Second
+	SyncInterval     = 30 * time.Second
+	PeerSyncInterval = 5 * time.Second
 )
 
 type Daemon struct {
@@ -44,6 +46,8 @@ func (d *Daemon) Start(ctx context.Context) error {
 	}
 	ticker := time.NewTicker(SyncInterval)
 	defer ticker.Stop()
+	peerTicker := time.NewTicker(SyncInterval)
+	defer peerTicker.Stop()
 	d.lock.Lock()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -64,6 +68,10 @@ func (d *Daemon) Start(ctx context.Context) error {
 		case <-ticker.C:
 			if err := d.runSync(ctx); err != nil {
 				d.Log.Info("Error during sync:", err)
+			}
+		case <-peerTicker.C:
+			if _, err := d.syncPeers(ctx); err != nil {
+				d.Log.Info("Error during peer sync:", err)
 			}
 		}
 	}
@@ -111,24 +119,55 @@ func (d *Daemon) init(ctx context.Context) error {
 }
 
 func (d *Daemon) runSync(ctx context.Context) error {
+	synced, err := d.syncPeers(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to sync peers: %w", err)
+	}
+	if synced {
+		return nil
+	}
+	return d.ensureLan(ctx)
+}
+
+func (d *Daemon) ensureLan(ctx context.Context) error {
+	peers := d.Peers
+	log.Default().Info("Ensuring direct LAN connection with peers:", peers)
+	return link.EnsureDirectLan(ctx, peers)
+}
+
+func (d *Daemon) syncPeers(ctx context.Context) (bool, error) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	d.Log.Info("Running sync: ensuring direct LAN connection and discovering peers")
-	err := link.EnsureDirectLan(ctx, d.Peers)
-	if err != nil {
-		return err
-	}
+	d.Log.Info("Running peer sync")
+	d.Log.Info("Current Peers:", d.Peers)
 	peers, err := discover.GetActiveKubePeers(ctx, d.LocalIP)
 	if err != nil {
-		return err
+		return false, err
 	}
-	d.Peers = peers
-	return link.EnsureDirectLan(ctx, peers)
+
+	needsSync := len(peers) != len(d.Peers)
+	if !needsSync {
+		sort.Strings(peers)
+		for i, peer := range peers {
+			if d.Peers[i] != peer {
+				needsSync = true
+				break
+				d.Log.Info("Peer change detected, re-syncing LAN setup")
+			}
+		}
+	}
+
+	if !needsSync {
+		d.Log.Info("No peer changes detected, skipping LAN setup")
+		return false, nil
+	}
+	d.Log.Info("Peer changes detected, re-syncing LAN setup")
+	return true, d.ensureLan(ctx)
 }
 
 func (d *Daemon) onInterfaceChange(ctx context.Context, iface net.Interface, mode link.EventMode) error {
 	log.Default().Info("Interface change detected:", iface.Name, "Mode:", mode)
-	valid, err := link.IsSecondaryNetworkInterface(iface)
+	valid, _, err := link.IsSecondaryNetworkInterface(iface)
 	if err != nil {
 		return fmt.Errorf("failed to check if interface %s is a secondary network interface: %w", iface.Name, err)
 	}
