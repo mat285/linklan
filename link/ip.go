@@ -285,46 +285,54 @@ func FindPhysicalInterfaces() (primary *net.Interface, filtered []net.Interface,
 	}
 	log.Default().Info("Found network interfaces:", len(ifaces))
 	for _, iface := range ifaces {
-		if iface.Flags&net.FlagLoopback != 0 {
-			log.Default().Info("Skipping loopback interface:", iface.Name)
-			continue
-		}
-		if IsFilteredInterface(iface) {
-			log.Default().Info("Skipping known virtual interface:", iface.Name)
-			continue
-		}
-		isHardware, err := IsHardwareInterface(iface)
+		valid, err := IsSecondaryNetworkInterface(iface)
 		if err != nil {
-			log.Default().Info("Error checking if interface is hardware:", iface.Name, err)
+			log.Default().Info("Error checking interface:", iface.Name, err)
 			continue
 		}
-		if !isHardware {
-			log.Default().Info("Skipping non-hardware interface:", iface.Name)
+		if !valid {
+			log.Default().Info("Skipping interface:", iface.Name)
 			continue
 		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			log.Default().Info("Error getting addresses for interface:", iface.Name, err)
-			continue
-		}
-		for _, addr := range addrs {
-			if strings.HasPrefix(addr.String(), PrimaryLanIpPrefix) {
-				primary = &iface
-				log.Default().Info("Found primary network interface:", iface.Name)
-				break
-			}
-		}
-		if primary != nil && primary == &iface {
-			log.Default().Info("Primary network interface already found, skipping further checks for:", iface.Name)
-			continue
-		}
-		log.Default().Info("Including hardware interface:", iface.Name)
 		filtered = append(filtered, iface)
 	}
 	if primary == nil {
 		return nil, filtered, fmt.Errorf("no primary network interface found")
 	}
 	return primary, filtered, nil
+}
+
+func IsSecondaryNetworkInterface(iface net.Interface) (bool, error) {
+	if iface.Flags&net.FlagLoopback != 0 {
+		log.Default().Info("Skipping loopback interface:", iface.Name)
+		return false, nil
+	}
+	if IsFilteredInterface(iface) {
+		log.Default().Info("Skipping known virtual interface:", iface.Name)
+		return false, nil
+	}
+	isHardware, err := IsHardwareInterface(iface)
+	if err != nil {
+		log.Default().Info("Error checking if interface is hardware:", iface.Name, err)
+		return false, err
+	}
+	if !isHardware {
+		log.Default().Info("Skipping non-hardware interface:", iface.Name)
+		return false, nil
+	}
+	addrs, err := iface.Addrs()
+	if err != nil {
+		log.Default().Info("Error getting addresses for interface:", iface.Name, err)
+		return false, err
+	}
+	for _, addr := range addrs {
+		if strings.HasPrefix(addr.String(), PrimaryLanIpPrefix) {
+			log.Default().Info("Found primary network interface:", iface.Name)
+			return false, nil // This is the primary interface
+		}
+	}
+	log.Default().Info("Including hardware interface:", iface.Name)
+	return true, nil // This is a secondary interface
 }
 
 func IsHardwareInterface(iface net.Interface) (bool, error) {

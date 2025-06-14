@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 const (
 	MaxInitAttempts = 10
 	InitRetryDelay  = 5 * time.Second
-	SyncInterval    = 30 * time.Second
+	SyncInterval    = 10 * time.Second
 )
 
 type Daemon struct {
@@ -25,12 +26,16 @@ type Daemon struct {
 
 	LocalIP string
 	Peers   []string
+
+	Watcher *link.DeviceWatcher
 }
 
 func New() *Daemon {
-	return &Daemon{
+	d := &Daemon{
 		Log: log.New(),
 	}
+	d.Watcher = link.NewDeviceWatcher(d.onInterfaceChange)
+	return d
 }
 
 func (d *Daemon) Start(ctx context.Context) error {
@@ -44,6 +49,8 @@ func (d *Daemon) Start(ctx context.Context) error {
 	defer cancel()
 	d.cancel = cancel
 	d.lock.Unlock()
+	go d.Watcher.Start(ctx)
+	defer d.Watcher.Stop()
 
 	// initial sync before starting the ticker
 	if err := d.runSync(ctx); err != nil {
@@ -117,4 +124,30 @@ func (d *Daemon) runSync(ctx context.Context) error {
 	}
 	d.Peers = peers
 	return link.EnsureDirectLan(ctx, peers)
+}
+
+func (d *Daemon) onInterfaceChange(ctx context.Context, iface net.Interface, mode link.EventMode) error {
+	log.Default().Info("Interface change detected:", iface.Name, "Mode:", mode)
+	valid, err := link.IsSecondaryNetworkInterface(iface)
+	if err != nil {
+		return fmt.Errorf("failed to check if interface %s is a secondary network interface: %w", iface.Name, err)
+	}
+	if !valid {
+		log.Default().Info("Interface", iface.Name, "is not a secondary network interface, skipping")
+		return nil
+	}
+	if mode != link.ModeCreate {
+		log.Default().Info("Skipping interface", iface.Name, "for mode", mode)
+		return nil
+	}
+
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	peers := d.Peers
+
+	log.Default().Info("Ensuring direct LAN setup for interface:", iface.Name)
+	if err := link.EnsureDirectLan(ctx, peers); err != nil {
+		return fmt.Errorf("failed to ensure direct LAN setup for interface %s: %w", iface.Name, err)
+	}
+	return nil
 }
