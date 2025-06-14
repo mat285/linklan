@@ -32,6 +32,8 @@ type Daemon struct {
 	Peers   []string
 
 	Watcher *link.DeviceWatcher
+
+	Server *discover.Server
 }
 
 func New() *Daemon {
@@ -54,9 +56,22 @@ func (d *Daemon) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	d.cancel = cancel
+	d.Server = discover.NewServer(link.SecondaryIPFromPrimaryIP(d.LocalIP), 11221)
 	d.lock.Unlock()
 	go d.Watcher.Start(ctx)
 	defer d.Watcher.Stop()
+	go func() {
+		if err := d.Server.Start(ctx); err != nil {
+			d.Log.Info("Server stopped with error:", err)
+			d.lock.Lock()
+			defer d.lock.Unlock()
+			if d.cancel != nil {
+				d.cancel()
+				d.cancel = nil
+			}
+		}
+	}()
+	defer d.Server.Stop()
 
 	// initial sync before starting the ticker
 	if err := d.runSync(ctx); err != nil {
