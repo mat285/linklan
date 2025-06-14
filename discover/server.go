@@ -15,6 +15,8 @@ import (
 var (
 	HeloBytes   = []byte{'H', 'E', 'L', 'L', 'O', '\n'} // HELO message bytes
 	AcceptBytes = []byte{'A', 'C', 'E', 'P', 'T', '\n'} // ACCEPT message bytes
+
+	SpeedTestDataSize int64 = 64 * 1024 * 1024 // 64 GB of data for speed test
 )
 
 type Server struct {
@@ -79,7 +81,7 @@ func (s *Server) SearchForPeers(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err() // Exit if context is done
-		case <-time.After(30 * time.Second): // Wait for 10 seconds before next search}
+		case <-time.After(60 * time.Second): // Wait for 10 seconds before next search}
 		}
 	}
 }
@@ -206,20 +208,17 @@ func (s *Server) handlePeerConnection(ctx context.Context, conn net.Conn) {
 			break // Exit if no data read
 		}
 		curr += int64(n)
-		if curr >= 4*1024*1024*1024 { // If 1 MB read
-			elapsed := time.Since(start) / time.Nanosecond // Calculate elapsed time in seconds
-			speed := (8 * curr / int64(elapsed)) * 1000    // Calculate speed in Mbps
-			// speeds = append(speeds, speed)                 // Store speed
-			log.Default().Info("Read 1 MB from", remoteAddr, "at speed:", float64(speed)/1000.0, "Gb/sec")
-			curr = 0 // Reset current read count
+		if curr >= SpeedTestDataSize { // If 1 MB read
+			calculateSpeed(curr, start) // Calculate speed
 			select {
 			case <-ctx.Done():
 				log.Default().Info("Context done, stopping read loop for", remoteAddr)
 				return // Exit if context is done
 			case <-time.After(5 * time.Second): // Wait for 5 seconds before next read
 				log.Default().Info("Waiting for next read from", remoteAddr)
-				start = time.Now() // Reset start time
 			}
+			curr = 0           // Reset current read count
+			start = time.Now() // Reset start time
 		}
 	}
 }
@@ -340,12 +339,8 @@ func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 			return
 		}
 		sent += int64(n)
-		if sent >= 4*1024*1024*1024 { // If 1 MB sent
-			elapsed := time.Since(start)           // Calculate elapsed time in seconds
-			speed := calculateSpeed(sent, elapsed) // Calculate speed
-			log.Default().Infof("Sent %d bytes to client at speed: %.2f Gbps", sent, speed)
-			sent = 0          // Reset sent count
-			rand.Read(buffer) // Fill buffer with new random data
+		if sent >= SpeedTestDataSize { // If 1 MB sent
+			calculateSpeed(sent, start) // Calculate speed
 
 			select {
 			case <-ctx.Done():
@@ -355,19 +350,23 @@ func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 				log.Default().Info("Waiting for next send to client")
 			}
 
+			sent = 0          // Reset sent count
+			rand.Read(buffer) // Fill buffer with new random data
+
 			start = time.Now() // Reset start time
 		}
 	}
 }
 
-func calculateSpeed(sent int64, elapsed time.Duration) float64 {
+func calculateSpeed(sent int64, start time.Time) float64 {
+	elapsed := time.Since(start) / time.Nanosecond
 	sent = sent * 8 // Convert bytes to bits
-	elapsed = elapsed / time.Nanosecond
 	// log.Default().Infof("Sent %d bytes to client in %dns", sent, elapsed)
 	if elapsed == 0 {
 		return 0 // Avoid division by zero
 	}
-	speed := (1000 * float64(sent) / float64(elapsed))
+	speed := (float64(sent) / float64(elapsed))
+	log.Default().Infof("Calculated speed: %f Gbps with %d MB of data", speed, sent/(8*1024*1024))
 	return speed
 }
 
