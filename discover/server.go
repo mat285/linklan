@@ -86,7 +86,8 @@ func (s *Server) SearchForPeers(ctx context.Context) error {
 
 func (s *Server) searchWholeLan(ctx context.Context, lan byte) error {
 	log.Default().Info("Searching whole LAN with ID", lan)
-	for ipID := byte(0); ipID <= byte(255); ipID++ {
+	for i := 0; i <= 255; i++ {
+		ipID := byte(i) // Use byte type for IP ID
 		select {
 		case <-ctx.Done():
 			return ctx.Err() // Exit if context is done
