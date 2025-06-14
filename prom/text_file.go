@@ -25,7 +25,7 @@ func AppendMetric(metric string, value string, ts time.Time, tags map[string]str
 	}
 	str += " " + value
 	if !ts.IsZero() {
-		str += " " + fmt.Sprintf("%d", ts.UTC().Unix())
+		str += " " + fmt.Sprintf("[%d]", ts.UTC().Unix())
 	}
 	str += "\n"
 	file, err := os.OpenFile(filepath.Join(TextFileDir, TextFileName), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
