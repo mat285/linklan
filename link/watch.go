@@ -118,6 +118,7 @@ func (dw *DeviceWatcher) RefreshInterfaces(ctx context.Context) error {
 
 	currentIfaces := make(map[string]net.Interface)
 	for _, iface := range ifaces {
+		currentIfaces[iface.Name] = iface
 		if _, exists := dw.ifaces[iface.Name]; !exists {
 			log.Default().Info("Adding device:", iface.Name)
 			if err := dw.notify(ctx, iface, ModeCreate); err != nil {
@@ -125,7 +126,6 @@ func (dw *DeviceWatcher) RefreshInterfaces(ctx context.Context) error {
 				continue
 			}
 		}
-		currentIfaces[iface.Name] = iface
 	}
 
 	for name := range dw.ifaces {
@@ -133,7 +133,7 @@ func (dw *DeviceWatcher) RefreshInterfaces(ctx context.Context) error {
 			log.Default().Info("Removing device:", name)
 			if err := dw.notify(ctx, iface, ModeRemove); err != nil {
 				log.Default().Error("Error removing device:", name, err)
-				currentIfaces[name] = iface // Keep it in currentIfaces to avoid nil dereference
+				// currentIfaces[name] = iface // Keep it in currentIfaces to avoid nil dereference
 				continue
 			}
 		}
@@ -141,6 +141,17 @@ func (dw *DeviceWatcher) RefreshInterfaces(ctx context.Context) error {
 
 	dw.ifaces = currentIfaces
 	return nil
+}
+
+func (dw *DeviceWatcher) GetInterfaces() []net.Interface {
+	dw.ifacesLock.Lock()
+	defer dw.ifacesLock.Unlock()
+
+	ifaces := make([]net.Interface, 0, len(dw.ifaces))
+	for _, iface := range dw.ifaces {
+		ifaces = append(ifaces, iface)
+	}
+	return ifaces
 }
 
 func (dw *DeviceWatcher) notify(ctx context.Context, iface net.Interface, mode EventMode) error {

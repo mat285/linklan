@@ -285,10 +285,17 @@ func FindPhysicalInterfaces() (primary *net.Interface, filtered []net.Interface,
 	}
 	log.Default().Info("Found network interfaces:", len(ifaces))
 	for _, iface := range ifaces {
-		valid, err := IsSecondaryNetworkInterface(iface)
+		valid, prime, err := IsSecondaryNetworkInterface(iface)
 		if err != nil {
 			log.Default().Info("Error checking interface:", iface.Name, err)
 			continue
+		}
+		if prime != nil {
+			if primary != nil {
+				log.Default().Info("Multiple primary interfaces found, skipping:", iface.Name)
+				continue // Skip if we already found a primary
+			}
+			primary = prime
 		}
 		if !valid {
 			log.Default().Info("Skipping interface:", iface.Name)
@@ -302,33 +309,33 @@ func FindPhysicalInterfaces() (primary *net.Interface, filtered []net.Interface,
 	return primary, filtered, nil
 }
 
-func IsSecondaryNetworkInterface(iface net.Interface) (bool, error) {
+func IsSecondaryNetworkInterface(iface net.Interface) (bool, *net.Interface, error) {
 	if iface.Flags&net.FlagLoopback != 0 {
 		log.Default().Info("Skipping loopback interface:", iface.Name)
-		return false, nil
+		return false, nil, nil
 	}
 	if IsFilteredInterface(iface) {
 		log.Default().Info("Skipping known virtual interface:", iface.Name)
-		return false, nil
+		return false, nil, nil
 	}
 	isHardware, err := IsHardwareInterface(iface)
 	if err != nil {
 		log.Default().Info("Error checking if interface is hardware:", iface.Name, err)
-		return false, err
+		return false, nil, err
 	}
 	if !isHardware {
 		log.Default().Info("Skipping non-hardware interface:", iface.Name)
-		return false, nil
+		return false, nil, nil
 	}
 	addrs, err := iface.Addrs()
 	if err != nil {
 		log.Default().Info("Error getting addresses for interface:", iface.Name, err)
-		return false, err
+		return false, nil, err
 	}
 	for _, addr := range addrs {
 		if strings.HasPrefix(addr.String(), PrimaryLanIpPrefix) {
 			log.Default().Info("Found primary network interface:", iface.Name)
-			return false, nil // This is the primary interface
+			return false, &iface, nil // This is the primary interface
 		}
 	}
 	log.Default().Info("Including hardware interface:", iface.Name)
