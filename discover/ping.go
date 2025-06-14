@@ -12,10 +12,12 @@ import (
 func TCPPing(ctx context.Context, ip string, port int) error {
 	log.Default().Info("Pinging IP:", ip, "on port:", port)
 	addr := net.JoinHostPort(ip, fmt.Sprintf("%d", port))
-	conn, err := net.DialTimeout("tcp4", addr, time.Second*5)
+	conn, err := net.DialTimeout("tcp4", addr, time.Second)
 	if err != nil {
+		log.Default().Info("Failed to connect to", addr, ":", err)
 		return err
 	}
 	conn.Close()
+	log.Default().Info("Successfully connected to", addr)
 	return nil
 }

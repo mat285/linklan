@@ -167,6 +167,11 @@ func (d *Daemon) syncPeers(ctx context.Context) (bool, error) {
 
 func (d *Daemon) onInterfaceChange(ctx context.Context, iface net.Interface, mode link.EventMode) error {
 	log.Default().Info("Interface change detected:", iface.Name, "Mode:", mode)
+	if mode != link.ModeCreate {
+		log.Default().Info("Skipping interface", iface.Name, "for mode", mode)
+		return nil
+	}
+
 	valid, _, err := link.IsSecondaryNetworkInterface(iface)
 	if err != nil {
 		return fmt.Errorf("failed to check if interface %s is a secondary network interface: %w", iface.Name, err)
@@ -175,18 +180,6 @@ func (d *Daemon) onInterfaceChange(ctx context.Context, iface net.Interface, mod
 		log.Default().Info("Interface", iface.Name, "is not a secondary network interface, skipping")
 		return nil
 	}
-	if mode != link.ModeCreate {
-		log.Default().Info("Skipping interface", iface.Name, "for mode", mode)
-		return nil
-	}
 
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	peers := d.Peers
-
-	log.Default().Info("Ensuring direct LAN setup for interface:", iface.Name)
-	if err := link.EnsureDirectLan(ctx, peers); err != nil {
-		return fmt.Errorf("failed to ensure direct LAN setup for interface %s: %w", iface.Name, err)
-	}
-	return nil
+	return d.ensureLan(ctx)
 }
