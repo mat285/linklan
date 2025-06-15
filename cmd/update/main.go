@@ -25,13 +25,6 @@ var (
 )
 
 func main() {
-	// fmt.Println("Sudo password")
-	// pwd, err := term.ReadPassword(0)
-	// if err != nil {
-	// 	fmt.Println("Error reading password:", err)
-	// 	os.Exit(1)
-	// }
-
 	wg := &sync.WaitGroup{}
 	lock := &sync.Mutex{}
 	for _, machine := range machines {

@@ -45,6 +45,15 @@ func (l *Logger) Warnf(format string, args ...any) {
 	l.Logger.Warn(fmt.Sprintf(format, args...))
 }
 
+func (l *Logger) Debug(msg string, msgs ...any) {
+	strs := make([]string, 0, len(msgs)+1)
+	strs = append(strs, msg)
+	for _, m := range msgs {
+		strs = append(strs, fmt.Sprintf("%v", m))
+	}
+	l.Debugf("%s", strings.Join(strs, " "))
+}
+
 func (l *Logger) Debugf(format string, args ...any) {
 	l.Logger.Debug(fmt.Sprintf(format, args...))
 }
