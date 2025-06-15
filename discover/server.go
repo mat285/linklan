@@ -183,15 +183,11 @@ func (s *Server) Listen(ctx context.Context) error {
 }
 
 func (s *Server) Stop() {
-	s.lock.Lock()
-	defer s.lock.Unlock()
 	if s.cancel != nil {
 		s.cancel()
-		s.cancel = nil
 	}
 	if s.done != nil {
-		close(s.done)
-		s.done = nil
+		<-s.done
 	}
 	log.Default().Info("Server stopped")
 }
