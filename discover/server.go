@@ -208,7 +208,7 @@ func (s *Server) tryPingPeer(ctx context.Context, ipID, lanID byte, port int) er
 }
 
 func (s *Server) tryReconnect(ctx context.Context, ipID, lanID byte) error {
-	log.Default().Debug("Attempting to reconnect to peer with IP ID", ipID, "and LAN ID", lanID)
+	log.Default().Info("Attempting to reconnect to peer with IP ID", ipID, "and LAN ID", lanID)
 	maxAttempts := 3
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		select {
