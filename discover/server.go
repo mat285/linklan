@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	mrand "math/rand"
 	"net"
 	"os"
 	"sync"
@@ -206,6 +207,44 @@ func (s *Server) tryPingPeer(ctx context.Context, ipID, lanID byte, port int) er
 	return nil
 }
 
+func (s *Server) tryReconnect(ctx context.Context, ipID, lanID byte) error {
+	log.Default().Debug("Attempting to reconnect to peer with IP ID", ipID, "and LAN ID", lanID)
+	maxAttempts := 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(mrand.Intn(500))*time.Millisecond + time.Duration(attempt*100)*time.Millisecond):
+		}
+
+		s.lock.Lock()
+		if _, exists := s.peers[ipID]; !exists {
+			s.peers[ipID] = make(map[byte]net.Conn)
+		}
+		_, exists := s.peers[ipID][lanID]
+		s.lock.Unlock()
+
+		if exists {
+			log.Default().Debugf("Connection to peer with IP ID %d and LAN ID %d already exists, skipping reconnect", ipID, lanID)
+			return nil
+		}
+
+		ip := net.ParseIP(s.IP)
+		ip[len(ip)-1] = ipID
+		ip[len(ip)-2] = lanID
+		addr := net.JoinHostPort(ip.String(), fmt.Sprintf("%d", s.Port))
+		log.Default().Debug("Reconnecting to peer at", addr)
+		conn, err := net.DialTimeout("tcp4", addr, DialTimeout)
+		if err == nil {
+			log.Default().Debugf("Successfully reconnected to peer at %s", addr)
+			go s.handleConnection(ctx, conn)
+			return nil
+		}
+		log.Default().Debugf("Failed to reconnect to peer at %s: %v", addr, err)
+	}
+	return fmt.Errorf("failed to reconnect to peer with IP ID %d and LAN ID %d after %d attempts", ipID, lanID, maxAttempts)
+}
+
 func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	ip := addressToIP(conn.RemoteAddr().String())
@@ -221,6 +260,11 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 		s.peers[ipID] = make(map[byte]net.Conn)
 	}
 
+	if _, exists := s.peers[ipID][lanID]; exists {
+		log.Default().Infof("Connection from %s on LAN %d already exists, closing duplicate connection", ip, lanID)
+		return
+	}
+
 	s.peers[ipID][lanID] = conn
 	s.peersLock.Unlock()
 
@@ -234,6 +278,7 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	}()
 
 	s.handleConnRW(ctx, conn)
+	go s.tryReconnect(ctx, ipID, lanID)
 }
 
 func (s *Server) handleConnRW(ctx context.Context, conn net.Conn) {
