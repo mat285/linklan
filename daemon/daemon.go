@@ -48,19 +48,26 @@ func (d *Daemon) Start(ctx context.Context) error {
 	if err := d.init(ctx); err != nil {
 		return fmt.Errorf("failed to initialize daemon: %w", err)
 	}
-	ticker := time.NewTicker(SyncInterval)
-	defer ticker.Stop()
-	peerTicker := time.NewTicker(SyncInterval)
-	defer peerTicker.Stop()
+
 	d.lock.Lock()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	d.cancel = cancel
 	d.Server = discover.NewServer(link.SecondaryIPFromPrimaryIP(d.LocalIP), 11221)
 	d.lock.Unlock()
-	go d.Watcher.Start(ctx)
-	defer d.Watcher.Stop()
+	var wg sync.WaitGroup
+
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
+		d.Watcher.Start(ctx)
+		log.Default().Info("Device watcher Stopped")
+	}()
+	defer d.Watcher.Stop()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		if err := d.Server.Start(ctx); err != nil {
 			d.Log.Info("Server stopped with error:", err)
 			d.lock.Lock()
@@ -70,6 +77,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 				d.cancel = nil
 			}
 		}
+		log.Default().Info("Server stopped")
 	}()
 	defer d.Server.Stop()
 
@@ -78,9 +86,16 @@ func (d *Daemon) Start(ctx context.Context) error {
 		d.Log.Info("Error during sync:", err)
 	}
 
+	ticker := time.NewTicker(SyncInterval)
+	defer ticker.Stop()
+	peerTicker := time.NewTicker(SyncInterval)
+	defer peerTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
+			wg.Wait()
+			d.Log.Info("Daemon stopped")
 			return ctx.Err()
 		case <-ticker.C:
 			if err := d.runSync(ctx); err != nil {
@@ -95,14 +110,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 }
 
 func (d *Daemon) Stop() {
-	d.lock.Lock()
-	defer d.lock.Unlock()
 	if d.cancel != nil {
 		d.cancel()
-		d.cancel = nil
 	}
-	d.LocalIP = ""
-	d.Peers = nil
 }
 
 func (d *Daemon) init(ctx context.Context) error {
