@@ -1,7 +1,6 @@
 package discover
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -19,6 +18,8 @@ var (
 	AcceptBytes = []byte{'A', 'C', 'E', 'P', 'T', '\n'}
 	BeginBytes  = []byte{'B', 'E', 'G', 'I', 'N', '\n'}
 	PingBytes   = []byte{'P', 'I', 'N', 'G', '\n'}
+
+	DialTimeout = 10 * time.Millisecond
 
 	SpeedTestDataSize   int64 = 16 * 1024 * 1024
 	SpeedTestInterval         = 60 * time.Second
@@ -63,6 +64,10 @@ func (s *Server) Start(ctx context.Context) error {
 		return fmt.Errorf("server already running")
 	}
 	s.lock.Lock()
+	if s.cancel != nil {
+		s.lock.Unlock()
+		return fmt.Errorf("server already running")
+	}
 	log.Default().Info("Starting server on", s.IP, ":", s.Port)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -70,13 +75,10 @@ func (s *Server) Start(ctx context.Context) error {
 	done := make(chan struct{})
 	s.done = done
 	s.lock.Unlock()
+
 	go s.SearchForPeers(ctx)
 	err := s.Listen(ctx)
 	cancel()
-	s.lock.Lock()
-	s.cancel = nil
-	s.done = nil
-	s.lock.Unlock()
 	close(done)
 	log.Default().Info("Server stopped")
 	return err
@@ -144,7 +146,7 @@ func (s *Server) searchWholeLan(ctx context.Context, lan byte) error {
 
 		if !exists {
 			log.Default().Debug("Trying to ping peer with IP ID", ipID, "and LAN ID", lan)
-			err := s.TryPingPeer(ctx, ipID, lan, s.Port)
+			err := s.tryPingPeer(ctx, ipID, lan, s.Port)
 			if err != nil {
 				log.Default().Debug("Failed to ping peer with IP ID", ipID, "and LAN ID", lan, ":", err)
 			}
@@ -159,6 +161,13 @@ func (s *Server) Listen(ctx context.Context) error {
 		return err
 	}
 	defer listener.Close()
+	go func() {
+		<-ctx.Done()
+		log.Default().Info("Stopping listener")
+		if err := listener.Close(); err != nil {
+			log.Default().Error("Error closing listener:", err)
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -169,40 +178,8 @@ func (s *Server) Listen(ctx context.Context) error {
 		if err != nil {
 			log.Default().Info("Error accepting connection:", err)
 		}
-		go s.handlePeerConnection(ctx, conn)
+		go s.handleConnection(ctx, conn)
 	}
-}
-
-func (s *Server) initializeConnectionAsServer(ctx context.Context, conn net.Conn) error {
-	log.Default().Info("Handling new peer connection from", conn.RemoteAddr())
-	intro := make([]byte, len(HeloBytes))
-	r, err := conn.Read(intro)
-	if err != nil {
-		return err
-	}
-	if r != len(HeloBytes) || !bytes.Equal(intro, HeloBytes) {
-		return err
-	}
-	log.Default().Info("Received HELO message from peer, processing connection")
-	r, err = conn.Write(AcceptBytes)
-	if err != nil {
-		return err
-	}
-	if r != len(AcceptBytes) {
-		return fmt.Errorf("failed to send ACCEPT message to peer, sent %d bytes, expected %d", r, len(AcceptBytes))
-	}
-	log.Default().Info("Sent ACCEPT message to peer, processing connection")
-	return nil
-}
-
-func (s *Server) handlePeerConnection(ctx context.Context, conn net.Conn) {
-	defer conn.Close()
-	err := s.initializeConnectionAsServer(ctx, conn)
-	if err != nil {
-		log.Default().Errorf("Error initializing connection as server: %v", err)
-		return
-	}
-	s.handleConnection(ctx, conn)
 }
 
 func (s *Server) Stop() {
@@ -219,48 +196,17 @@ func (s *Server) Stop() {
 	log.Default().Info("Server stopped")
 }
 
-func (s *Server) TryPingPeer(ctx context.Context, ipID, lanID byte, port int) error {
+func (s *Server) tryPingPeer(ctx context.Context, ipID, lanID byte, port int) error {
 	ip := net.ParseIP(s.IP)
 	ip[len(ip)-1] = ipID
 	log.Default().Debug("Pinging peer at", ip, "on port", port)
 	addr := net.JoinHostPort(ip.String(), fmt.Sprintf("%d", port))
 	ip[len(ip)-2] = lanID
-	conn, err := net.DialTimeout("tcp4", addr, 10*time.Millisecond)
+	conn, err := net.DialTimeout("tcp4", addr, DialTimeout)
 	if err != nil {
 		return fmt.Errorf("failed to connect to %s: %w", addr, err)
 	}
-	err = s.initializeConnectionAsClient(ctx, conn)
-	if err != nil {
-		log.Default().Errorf("%v", err)
-		conn.Close()
-		return err
-	}
 	go s.handleConnection(ctx, conn)
-	return nil
-}
-
-func (s *Server) initializeConnectionAsClient(ctx context.Context, conn net.Conn) error {
-	addr := conn.RemoteAddr().String()
-	r, err := conn.Write(HeloBytes)
-	if err != nil {
-		log.Default().Info("Error writing to connection:", err)
-		return err
-	}
-	if r != len(HeloBytes) {
-		return fmt.Errorf("failed to send HELO message to %s", addr)
-	}
-	log.Default().Info("Sent HELO message to", addr, ", waiting for response")
-
-	conn.SetReadDeadline(time.Now().Add(1000 * time.Millisecond))
-	acceptBuffer := make([]byte, len(AcceptBytes))
-	r, err = conn.Read(acceptBuffer)
-	if err != nil {
-		return fmt.Errorf("failed to read ACCEPT message from %s: %w", addr, err)
-	}
-	if r != len(AcceptBytes) || !bytes.Equal(acceptBuffer, AcceptBytes) {
-		return fmt.Errorf("invalid ACCEPT message from %s", addr)
-	}
-	log.Default().Info("Received ACCEPT message from", addr, ", connection established")
 	return nil
 }
 
@@ -316,11 +262,9 @@ func (s *Server) handleConnRW(ctx context.Context, conn net.Conn) {
 		}
 	}(&wg)
 	wg.Wait()
-	return
 }
 
 func (s *Server) writeConn(ctx context.Context, conn net.Conn) error {
-	// buffer := make([]byte, SpeedTestBufferSize)
 	for {
 		select {
 		case <-ctx.Done():
@@ -341,37 +285,6 @@ func (s *Server) writeConn(ctx context.Context, conn net.Conn) error {
 			return ctx.Err()
 		case <-time.After(PingInterval):
 		}
-		// log.Default().Info("Beginning write speed test to connection", conn.RemoteAddr())
-		// rand.Read(buffer)
-		// count := int64(0)
-		// start := time.Now()
-		// for count < SpeedTestDataSize {
-		// 	n, err := conn.Write(buffer)
-		// 	if err != nil {
-		// 		log.Default().Info("Error writing to connection:", err)
-		// 		return err
-		// 	}
-		// 	count += int64(n)
-		// }
-		// speed, mb := calculateSpeed(count, start)
-		// log.Default().Infof("Wrote %d bytes to connection, speed: %f Gbps with %d MB of data", count, speed, mb)
-		// err := prom.AppendMetric(
-		// 	MetricName,
-		// 	fmt.Sprintf("%0.4f", speed),
-		// 	time.Now(),
-		// 	map[string]string{
-		// 		"host":   s.IP,
-		// 		"remote": addressToIP(conn.RemoteAddr().String()).String(),
-		// 	},
-		// )
-		// if err != nil {
-		// 	log.Default().Info("Error appending metric:", err)
-		// }
-		// select {
-		// case <-ctx.Done():
-		// 	return ctx.Err()
-		// case <-time.After(SpeedTestInterval + time.Duration(mrand.Intn(2000))*time.Millisecond):
-		// }
 	}
 }
 
@@ -391,73 +304,6 @@ func (s *Server) readConn(ctx context.Context, conn net.Conn) error {
 		}
 	}
 }
-
-// func (s *Server) runSpeedTest(ctx context.Context, conn net.Conn, pre func([]byte) (int, error), move func([]byte) (int, error)) {
-// 	localIP := net.ParseIP(s.IP)
-// 	localIP[len(localIP)-2] = 1
-// 	ip := addressToIP(conn.RemoteAddr().String())
-// 	rIP := addressToIP(conn.RemoteAddr().String())
-// 	rIP[len(rIP)-2] = 1
-// 	buffer := make([]byte, SpeedTestBufferSize)
-// 	if pre != nil {
-// 		_, err := pre(buffer)
-// 		if err != nil {
-// 			log.Default().Info("Error in pre function:", err)
-// 			return
-// 		}
-// 	}
-
-// 	sent := int64(0)
-// 	start := time.Now()
-
-// 	processed := make([]int64, 0)
-
-// 	for {
-// 		select {
-// 		case <-ctx.Done():
-// 			return
-// 		default:
-// 		}
-
-// 		n, err := move(buffer)
-// 		if err != nil {
-// 			log.Default().Info("Error writing to client:", err)
-// 			return
-// 		}
-// 		sent += int64(n)
-// 		if sent >= SpeedTestDataSize {
-// 			speed, mb := calculateSpeed(sent, start)
-// 			log.Default().Infof("Calculated speed of connection with %s: %f Gbps with %d MB of data", ip.String(), speed, mb)
-// 			if speed > 0 {
-// 				err = prom.AppendMetric(
-// 					MetricName,
-// 					fmt.Sprintf("%0.4f", speed),
-// 					time.Now(),
-// 					map[string]string{
-// 						"host":   localIP.String(),
-// 						"remote": rIP.String(),
-// 					},
-// 				)
-// 			}
-// 			if err != nil {
-// 				log.Default().Info("Error appending metric:", err)
-// 			}
-
-// 			select {
-// 			case <-ctx.Done():
-// 				return
-// 			case <-time.After(SpeedTestInterval):
-// 				log.Default().Info("Waiting for next send to client")
-// 			}
-
-// 			sent = 0
-// 			if pre != nil {
-// 				pre(buffer)
-// 			}
-// 			start = time.Now()
-// 		}
-// 	}
-// }
 
 func calculateSpeed(sent int64, start time.Time) (float64, int64) {
 	elapsed := time.Since(start) / time.Nanosecond
