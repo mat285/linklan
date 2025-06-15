@@ -1,4 +1,4 @@
-VERSION ?= v0.2.0
+VERSION ?= v0.2.1
 GIT_SHA ?= $(shell git log --pretty=format:'%H' -n 1 2> /dev/null | cut -c1-8)
 
 .PHONY: release-all

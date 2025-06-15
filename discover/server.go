@@ -3,24 +3,28 @@ package discover
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
+	"errors"
 	"fmt"
-	mrand "math/rand"
+	"io"
 	"net"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/mat285/linklan/log"
-	"github.com/mat285/linklan/prom"
 )
 
 var (
 	HeloBytes   = []byte{'H', 'E', 'L', 'L', 'O', '\n'}
 	AcceptBytes = []byte{'A', 'C', 'E', 'P', 'T', '\n'}
+	BeginBytes  = []byte{'B', 'E', 'G', 'I', 'N', '\n'}
+	PingBytes   = []byte{'P', 'I', 'N', 'G', '\n'}
 
 	SpeedTestDataSize   int64 = 16 * 1024 * 1024
-	SpeedTestInterval         = 20 * time.Second
+	SpeedTestInterval         = 60 * time.Second
 	SpeedTestBufferSize       = 1024 * 1024
+
+	PingInterval = 1 * time.Second
 
 	MetricName = "link_speed"
 )
@@ -35,13 +39,22 @@ type Server struct {
 
 	peersLock sync.Mutex
 	peers     map[byte]map[byte]net.Conn
+
+	knownPeersLock sync.Mutex
+	knownPeers     map[string]struct{} // Track known peers to avoid duplicates
 }
 
 func NewServer(ip string, port int) *Server {
 	return &Server{
-		IP:    ip,
-		Port:  port,
-		peers: make(map[byte]map[byte]net.Conn),
+		IP:             ip,
+		Port:           port,
+		peers:          make(map[byte]map[byte]net.Conn),
+		knownPeers:     make(map[string]struct{}),
+		peersLock:      sync.Mutex{},
+		knownPeersLock: sync.Mutex{},
+		lock:           sync.Mutex{},
+		cancel:         nil,
+		done:           nil,
 	}
 }
 
@@ -130,7 +143,7 @@ func (s *Server) searchWholeLan(ctx context.Context, lan byte) error {
 		s.peersLock.Unlock()
 
 		if !exists {
-			log.Default().Info("Trying to ping peer with IP ID", ipID, "and LAN ID", lan)
+			log.Default().Debug("Trying to ping peer with IP ID", ipID, "and LAN ID", lan)
 			err := s.TryPingPeer(ctx, ipID, lan, s.Port)
 			if err != nil {
 				log.Default().Debug("Failed to ping peer with IP ID", ipID, "and LAN ID", lan, ":", err)
@@ -189,29 +202,7 @@ func (s *Server) handlePeerConnection(ctx context.Context, conn net.Conn) {
 		log.Default().Errorf("Error initializing connection as server: %v", err)
 		return
 	}
-
-	remoteAddr := addressToIP(conn.RemoteAddr().String())
-	ipID := remoteAddr[len(remoteAddr)-1]
-	lanID := remoteAddr[len(remoteAddr)-2]
-
-	s.peersLock.Lock()
-	if _, has := s.peers[ipID]; !has {
-		s.peers[ipID] = make(map[byte]net.Conn)
-	}
-	if _, has := s.peers[ipID][lanID]; has {
-		log.Default().Errorf("Peer already connected: %s", remoteAddr)
-		s.peersLock.Unlock()
-		return
-	}
-	s.peers[ipID][lanID] = conn
-	s.peersLock.Unlock()
-
-	s.runSpeedTest(
-		ctx,
-		conn,
-		nil,
-		conn.Read,
-	)
+	s.handleConnection(ctx, conn)
 }
 
 func (s *Server) Stop() {
@@ -244,7 +235,7 @@ func (s *Server) TryPingPeer(ctx context.Context, ipID, lanID byte, port int) er
 		conn.Close()
 		return err
 	}
-	go s.handleClientConnection(ctx, conn)
+	go s.handleConnection(ctx, conn)
 	return nil
 }
 
@@ -273,11 +264,15 @@ func (s *Server) initializeConnectionAsClient(ctx context.Context, conn net.Conn
 	return nil
 }
 
-func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
+func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	ip := addressToIP(conn.RemoteAddr().String())
 	ipID := ip[len(ip)-1]
 	lanID := ip[len(ip)-2]
+
+	s.knownPeersLock.Lock()
+	s.knownPeers[ip.String()] = struct{}{}
+	s.knownPeersLock.Unlock()
 
 	s.peersLock.Lock()
 	if s.peers[ipID] == nil {
@@ -296,81 +291,173 @@ func (s *Server) handleClientConnection(ctx context.Context, conn net.Conn) {
 		s.peersLock.Unlock()
 	}()
 
-	log.Default().Info("Handling client connection from", conn.RemoteAddr())
-	s.runSpeedTest(
-		ctx,
-		conn,
-		rand.Read,
-		conn.Write,
-	)
+	s.handleConnRW(ctx, conn)
 }
 
-func (s *Server) runSpeedTest(ctx context.Context, conn net.Conn, pre func([]byte) (int, error), move func([]byte) (int, error)) {
-	localIP := net.ParseIP(s.IP)
-	localIP[len(localIP)-2] = 1
-	ip := addressToIP(conn.RemoteAddr().String())
-	rIP := addressToIP(conn.RemoteAddr().String())
-	rIP[len(rIP)-2] = 1
-	buffer := make([]byte, SpeedTestBufferSize)
-	if pre != nil {
-		_, err := pre(buffer)
-		if err != nil {
-			log.Default().Info("Error in pre function:", err)
-			return
+func (s *Server) handleConnRW(ctx context.Context, conn net.Conn) {
+	var rErr, wErr error
+	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(ctx)
+	wg.Add(2)
+	go func(wg *sync.WaitGroup) {
+		defer wg.Done()
+		defer cancel()
+		wErr = s.writeConn(ctx, conn)
+		if wErr != nil {
+			log.Default().Errorf("Error during write speed test: %v", wErr)
 		}
-	}
+	}(&wg)
+	go func(wg *sync.WaitGroup) {
+		defer wg.Done()
+		defer cancel()
+		rErr = s.readConn(ctx, conn)
+		if rErr != nil {
+			log.Default().Errorf("Error reading from connection: %v", rErr)
+		}
+	}(&wg)
+	wg.Wait()
+	return
+}
 
-	sent := int64(0)
-	start := time.Now()
-
+func (s *Server) writeConn(ctx context.Context, conn net.Conn) error {
+	// buffer := make([]byte, SpeedTestBufferSize)
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		default:
 		}
-
-		n, err := move(buffer)
+		conn.SetWriteDeadline(time.Now().Add(PingInterval))
+		n, err := conn.Write(PingBytes)
 		if err != nil {
-			log.Default().Info("Error writing to client:", err)
-			return
+			return err
 		}
-		sent += int64(n)
-		if sent >= SpeedTestDataSize {
-			speed, mb := calculateSpeed(sent, start)
-			log.Default().Infof("Calculated speed of connection with %s: %f Gbps with %d MB of data", ip.String(), speed, mb)
-			if speed > 0 {
-				err = prom.AppendMetric(
-					MetricName,
-					fmt.Sprintf("%0.4f", speed),
-					time.Now(),
-					map[string]string{
-						"host":   localIP.String(),
-						"remote": rIP.String(),
-					},
-				)
-			}
-			if err != nil {
-				log.Default().Info("Error appending metric:", err)
-			}
+		if n != len(PingBytes) {
+			return fmt.Errorf("failed to write full ping bytes to connection, wrote %d bytes, expected %d", n, len(PingBytes))
+		}
 
-			jitter := mrand.Int63n(1000)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(PingInterval):
+		}
+		// log.Default().Info("Beginning write speed test to connection", conn.RemoteAddr())
+		// rand.Read(buffer)
+		// count := int64(0)
+		// start := time.Now()
+		// for count < SpeedTestDataSize {
+		// 	n, err := conn.Write(buffer)
+		// 	if err != nil {
+		// 		log.Default().Info("Error writing to connection:", err)
+		// 		return err
+		// 	}
+		// 	count += int64(n)
+		// }
+		// speed, mb := calculateSpeed(count, start)
+		// log.Default().Infof("Wrote %d bytes to connection, speed: %f Gbps with %d MB of data", count, speed, mb)
+		// err := prom.AppendMetric(
+		// 	MetricName,
+		// 	fmt.Sprintf("%0.4f", speed),
+		// 	time.Now(),
+		// 	map[string]string{
+		// 		"host":   s.IP,
+		// 		"remote": addressToIP(conn.RemoteAddr().String()).String(),
+		// 	},
+		// )
+		// if err != nil {
+		// 	log.Default().Info("Error appending metric:", err)
+		// }
+		// select {
+		// case <-ctx.Done():
+		// 	return ctx.Err()
+		// case <-time.After(SpeedTestInterval + time.Duration(mrand.Intn(2000))*time.Millisecond):
+		// }
+	}
+}
 
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(SpeedTestInterval + time.Duration(jitter)*time.Millisecond):
-				log.Default().Info("Waiting for next send to client")
-			}
-
-			sent = 0
-			if pre != nil {
-				pre(buffer)
-			}
-			start = time.Now()
+func (s *Server) readConn(ctx context.Context, conn net.Conn) error {
+	buffer := make([]byte, SpeedTestBufferSize)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		conn.SetReadDeadline(time.Now().Add(2 * PingInterval))
+		_, err := conn.Read(buffer)
+		if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) && !errors.Is(err, io.EOF) {
+			log.Default().Info("Error reading from connection:", err)
+			return err
 		}
 	}
 }
+
+// func (s *Server) runSpeedTest(ctx context.Context, conn net.Conn, pre func([]byte) (int, error), move func([]byte) (int, error)) {
+// 	localIP := net.ParseIP(s.IP)
+// 	localIP[len(localIP)-2] = 1
+// 	ip := addressToIP(conn.RemoteAddr().String())
+// 	rIP := addressToIP(conn.RemoteAddr().String())
+// 	rIP[len(rIP)-2] = 1
+// 	buffer := make([]byte, SpeedTestBufferSize)
+// 	if pre != nil {
+// 		_, err := pre(buffer)
+// 		if err != nil {
+// 			log.Default().Info("Error in pre function:", err)
+// 			return
+// 		}
+// 	}
+
+// 	sent := int64(0)
+// 	start := time.Now()
+
+// 	processed := make([]int64, 0)
+
+// 	for {
+// 		select {
+// 		case <-ctx.Done():
+// 			return
+// 		default:
+// 		}
+
+// 		n, err := move(buffer)
+// 		if err != nil {
+// 			log.Default().Info("Error writing to client:", err)
+// 			return
+// 		}
+// 		sent += int64(n)
+// 		if sent >= SpeedTestDataSize {
+// 			speed, mb := calculateSpeed(sent, start)
+// 			log.Default().Infof("Calculated speed of connection with %s: %f Gbps with %d MB of data", ip.String(), speed, mb)
+// 			if speed > 0 {
+// 				err = prom.AppendMetric(
+// 					MetricName,
+// 					fmt.Sprintf("%0.4f", speed),
+// 					time.Now(),
+// 					map[string]string{
+// 						"host":   localIP.String(),
+// 						"remote": rIP.String(),
+// 					},
+// 				)
+// 			}
+// 			if err != nil {
+// 				log.Default().Info("Error appending metric:", err)
+// 			}
+
+// 			select {
+// 			case <-ctx.Done():
+// 				return
+// 			case <-time.After(SpeedTestInterval):
+// 				log.Default().Info("Waiting for next send to client")
+// 			}
+
+// 			sent = 0
+// 			if pre != nil {
+// 				pre(buffer)
+// 			}
+// 			start = time.Now()
+// 		}
+// 	}
+// }
 
 func calculateSpeed(sent int64, start time.Time) (float64, int64) {
 	elapsed := time.Since(start) / time.Nanosecond

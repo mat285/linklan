@@ -21,7 +21,7 @@ var (
 		"zstation",
 	}
 
-	version = "v0.2.0" // Update this to the latest version of your script
+	version = "v0.2.1" // Update this to the latest version of your script
 )
 
 func main() {
@@ -29,7 +29,7 @@ func main() {
 	lock := &sync.Mutex{}
 	for _, machine := range machines {
 		wg.Add(1)
-		go func(machine string) {
+		func(machine string) {
 			defer wg.Done()
 			lock.Lock()
 			fmt.Printf("Updating %s...\n", machine)
@@ -41,11 +41,15 @@ func main() {
 				`sh -c "$(curl -fsSL https://github.com/mat285/linklan/releases/download/`+version+`/install.sh)"`,
 				// `sudo sh -c 'mkdir -p /etc/prometheus/node_exporter/textfile_collector'`,
 			)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+
 			cmd.Env = append(os.Environ(), `SUDO_OPTS="-S"`)
-			output, err := cmd.CombinedOutput()
-			lock.Lock()
-			fmt.Println(string(output))
-			lock.Unlock()
+			err := cmd.Run()
+			// output, err := cmd.CombinedOutput()
+			// lock.Lock()
+			// fmt.Println(string(output))
+			// lock.Unlock()
 			if err != nil {
 				fmt.Printf("Error running command on %s: %v\n", machine, err)
 				os.Exit(1)
