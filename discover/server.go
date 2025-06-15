@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	mrand "math/rand"
 	"net"
 	"sync"
 	"time"
@@ -18,7 +19,7 @@ var (
 	AcceptBytes = []byte{'A', 'C', 'E', 'P', 'T', '\n'}
 
 	SpeedTestDataSize   int64 = 16 * 1024 * 1024
-	SpeedTestInterval         = 10 * time.Second
+	SpeedTestInterval         = 20 * time.Second
 	SpeedTestBufferSize       = 1024 * 1024
 
 	MetricName = "link_speed"
@@ -353,10 +354,12 @@ func (s *Server) runSpeedTest(ctx context.Context, conn net.Conn, pre func([]byt
 				log.Default().Info("Error appending metric:", err)
 			}
 
+			jitter := mrand.Int63n(1000)
+
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(SpeedTestInterval):
+			case <-time.After(SpeedTestInterval + time.Duration(jitter)*time.Millisecond):
 				log.Default().Info("Waiting for next send to client")
 			}
 
