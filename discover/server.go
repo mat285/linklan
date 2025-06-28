@@ -448,6 +448,7 @@ func (s *Server) runUDPListener(ctx context.Context, iface string, listener *net
 }
 
 func (s *Server) handleUDPPacket(ctx context.Context, iface string, packet []byte, addr *net.UDPAddr) error {
+	log.GetLogger(ctx).Debugf("Received UDP packet from %s on interface %s: %s", addr, iface, string(packet))
 	if len(packet) < len(UDPIPPayloadPrefix) || !strings.HasPrefix(string(packet[:len(UDPIPPayloadPrefix)]), string(UDPIPPayloadPrefix)) {
 		log.GetLogger(ctx).Debugf("Received non-IP packet from %s: %s", addr, packet)
 		return nil
