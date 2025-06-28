@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	mrand "math/rand"
 	"net"
 	"os"
@@ -29,6 +30,7 @@ var (
 	SpeedTestBufferSize       = 1024 * 1024
 
 	PingInterval = 1 * time.Second
+	PingTimeout  = 3 * time.Second
 
 	MetricName = "link_speed"
 )
@@ -125,7 +127,7 @@ func (s *Server) SearchForPeers(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(60 * time.Second):
+		case <-time.After(time.Duration(rand.Intn(2500)+60000) * time.Millisecond):
 		}
 	}
 }
@@ -318,25 +320,28 @@ func (s *Server) handleConnRW(ctx context.Context, conn net.Conn) {
 }
 
 func (s *Server) writeConn(ctx context.Context, conn net.Conn) error {
+	lastPing := time.Now()
 	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if time.Since(lastPing) > PingTimeout {
+			log.GetLogger(ctx).Infof("No ping response for %s, closing connection", conn.RemoteAddr().String())
+			return fmt.Errorf("no ping response for %s, closing connection", conn.RemoteAddr().String())
 		}
-		conn.SetWriteDeadline(time.Now().Add(PingInterval))
-		n, err := conn.Write(PingBytes)
-		if err != nil {
-			return err
-		}
-		if n != len(PingBytes) {
-			return fmt.Errorf("failed to write full ping bytes to connection, wrote %d bytes, expected %d", n, len(PingBytes))
-		}
-
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(PingInterval):
+		}
+		conn.SetWriteDeadline(time.Now().Add(PingInterval))
+		n, err := conn.Write(PingBytes)
+		if err != nil {
+			if !errors.Is(err, os.ErrDeadlineExceeded) {
+				return err
+			}
+			continue
+		}
+		if n != len(PingBytes) {
+			log.GetLogger(ctx).Errorf("failed to write full ping bytes to connection, wrote %d bytes, expected %d", n, len(PingBytes))
+			continue
 		}
 	}
 }
