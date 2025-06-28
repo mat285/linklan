@@ -421,8 +421,19 @@ func (s *Server) runUDPListener(ctx context.Context, iface string, listener *net
 			return ctx.Err()
 		default:
 		}
+
+		go func() {
+			fmt.Println("broadcasting UDP packet on interface", iface)
+			err := s.broadcastUDP(ctx, iface, ip)
+			if err != nil {
+				log.GetLogger(ctx).Infof("Error broadcasting UDP packet on interface %s: %v", iface, err)
+			} else {
+				log.GetLogger(ctx).Debugf("Broadcasted UDP packet on interface %s", iface)
+			}
+		}()
+
 		fmt.Println("reading from UDP listener on interface", iface)
-		listener.SetReadDeadline(time.Now().Add(time.Second))
+		listener.SetReadDeadline(time.Now().Add(5 * time.Second))
 		n, addr, err := listener.ReadFromUDP(buffer)
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
@@ -436,13 +447,6 @@ func (s *Server) runUDPListener(ctx context.Context, iface string, listener *net
 		err = s.handleUDPPacket(ctx, iface, buffer[:n], addr)
 		if err != nil {
 			log.GetLogger(ctx).Infof("Error handling UDP packet from %s: %v", addr, err)
-		}
-
-		err = s.broadcastUDP(ctx, iface, ip)
-		if err != nil {
-			log.GetLogger(ctx).Infof("Error broadcasting UDP packet on interface %s: %v", iface, err)
-		} else {
-			log.GetLogger(ctx).Debugf("Broadcasted UDP packet on interface %s", iface)
 		}
 	}
 }
