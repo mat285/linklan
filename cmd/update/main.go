@@ -18,6 +18,7 @@ var (
 		"node6",
 		"node7",
 		"worker0",
+		"worker2",
 		"zstation",
 	}
 
