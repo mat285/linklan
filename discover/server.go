@@ -410,6 +410,10 @@ func (s *Server) runUDPListener(ctx context.Context, iface string, listener *net
 	if len(buffer) == 0 {
 		buffer = make([]byte, 1024)
 	}
+	ip := listener.LocalAddr().(*net.UDPAddr).IP.To4()
+	if ip == nil {
+		return fmt.Errorf("invalid IPv4 address for UDP listener on interface %s", iface)
+	}
 	log.GetLogger(ctx).Infof("Listening on UDP %s for interface %s", listener.LocalAddr().String(), iface)
 	for {
 		select {
@@ -432,6 +436,13 @@ func (s *Server) runUDPListener(ctx context.Context, iface string, listener *net
 		err = s.handleUDPPacket(ctx, iface, buffer[:n], addr)
 		if err != nil {
 			log.GetLogger(ctx).Infof("Error handling UDP packet from %s: %v", addr, err)
+		}
+
+		err = s.broadcastUDP(ctx, iface, ip)
+		if err != nil {
+			log.GetLogger(ctx).Infof("Error broadcasting UDP packet on interface %s: %v", iface, err)
+		} else {
+			log.GetLogger(ctx).Debugf("Broadcasted UDP packet on interface %s", iface)
 		}
 	}
 }
@@ -468,7 +479,7 @@ func (s *Server) Stop() {
 	}
 }
 
-func (s *Server) broadCastUDP(ctx context.Context, iface string, ip net.IP) error {
+func (s *Server) broadcastUDP(ctx context.Context, iface string, ip net.IP) error {
 	laddr, err := net.ResolveUDPAddr("udp4", net.JoinHostPort(ip.String(), fmt.Sprintf("%d", s.Port+1)))
 	if err != nil {
 		return fmt.Errorf("failed to resolve UDP address for broadcast: %w", err)
