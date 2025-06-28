@@ -387,7 +387,7 @@ func (s *Server) listenUDPIface(ctx context.Context, iface string) error {
 		break
 	}
 
-	if lanIP == nil {
+	if lanIP == nil || len(lanIP) != 4 || (lanIP[0] == 0 && lanIP[1] == 0 && lanIP[2] == 0 && lanIP[3] == 0) {
 		return fmt.Errorf("no valid IPv4 address found for interface %s", iface)
 	}
 
@@ -401,7 +401,7 @@ func (s *Server) listenUDPIface(ctx context.Context, iface string) error {
 		return fmt.Errorf("failed to listen on UDP %s: %w", addr, err)
 	}
 	defer listener.Close()
-	log.GetLogger(ctx).Infof("Listening on UDP %s for interface %s", addr, iface)
+	log.GetLogger(ctx).Infof("Listening on UDP %s for interface %s", uaddr, iface)
 	return s.runUDPListener(ctx, iface, listener, nil)
 }
 
@@ -410,7 +410,7 @@ func (s *Server) runUDPListener(ctx context.Context, iface string, listener *net
 	if len(buffer) == 0 {
 		buffer = make([]byte, 1024)
 	}
-	log.GetLogger(ctx).Infof("Listening on UDP %s:%d for interface %s", s.IP, s.Port, iface)
+	log.GetLogger(ctx).Infof("Listening on UDP %s for interface %s", listener.LocalAddr().String(), iface)
 	for {
 		select {
 		case <-ctx.Done():
