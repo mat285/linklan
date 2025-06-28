@@ -405,13 +405,14 @@ func (s *Server) runUDPListener(ctx context.Context, iface string, listener *net
 	if len(buffer) == 0 {
 		buffer = make([]byte, 1024)
 	}
-	log.GetLogger(ctx).Infof("Listening on UDP %s:%d", s.IP, s.Port)
+	log.GetLogger(ctx).Infof("Listening on UDP %s:%d for interface %s", s.IP, s.Port, iface)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
+		fmt.Println("reading from UDP listener on interface", iface)
 		n, addr, err := listener.ReadFromUDP(buffer)
 		if err != nil {
 			log.GetLogger(ctx).Infof("Error reading from UDP: %v", err)
