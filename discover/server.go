@@ -468,6 +468,33 @@ func (s *Server) Stop() {
 	}
 }
 
+func (s *Server) broadCastUDP(ctx context.Context, iface string, ip net.IP) error {
+	laddr, err := net.ResolveUDPAddr("udp4", net.JoinHostPort(ip.String(), fmt.Sprintf("%d", s.Port+1)))
+	if err != nil {
+		return fmt.Errorf("failed to resolve UDP address for broadcast: %w", err)
+	}
+	raddr, err := net.ResolveUDPAddr("udp4", net.JoinHostPort(net.IPv4bcast.String(), fmt.Sprintf("%d", s.Port)))
+	if err != nil {
+		return fmt.Errorf("failed to resolve UDP broadcast address: %w", err)
+	}
+	conn, err := net.DialUDP("udp4", laddr, raddr)
+	if err != nil {
+		return fmt.Errorf("failed to dial UDP broadcast: %w", err)
+	}
+	defer conn.Close()
+	log.GetLogger(ctx).Infof("Broadcasting UDP packet to %s on interface %s", net.IPv4bcast, iface)
+	packet := append(UDPIPPayloadPrefix, ip.To4()...)
+	n, err := conn.Write(packet)
+	if err != nil {
+		return fmt.Errorf("failed to write UDP packet: %w", err)
+	}
+	if n != len(packet) {
+		return fmt.Errorf("failed to write full UDP packet, wrote %d bytes, expected %d", n, len(packet))
+	}
+	log.GetLogger(ctx).Debugf("Broadcasted UDP packet to %s on interface %s", net.IPv4bcast, iface)
+	return nil
+}
+
 func (s *Server) tryPingPeer(ctx context.Context, ip net.IP, port int) error {
 	log.GetLogger(ctx).Debug("Pinging peer at", ip, "on port", port)
 	addr := net.JoinHostPort(ip.String(), fmt.Sprintf("%d", port))
