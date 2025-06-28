@@ -413,10 +413,15 @@ func (s *Server) runUDPListener(ctx context.Context, iface string, listener *net
 		default:
 		}
 		fmt.Println("reading from UDP listener on interface", iface)
+		listener.SetReadDeadline(time.Now().Add(time.Second))
 		n, addr, err := listener.ReadFromUDP(buffer)
 		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				log.GetLogger(ctx).Debugf("UDP read deadline exceeded on interface %s, continuing to listen", iface)
+				continue
+			}
 			log.GetLogger(ctx).Infof("Error reading from UDP: %v", err)
-			continue
+			return err
 		}
 		//handle packet
 		err = s.handleUDPPacket(ctx, iface, buffer[:n], addr)

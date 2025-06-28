@@ -173,13 +173,14 @@ func (d *Daemon) runSync(ctx context.Context) error {
 func (d *Daemon) ensureLanUnsafe(ctx context.Context) error {
 	peers := d.Peers
 	log.GetLogger(ctx).Info("Ensuring direct LAN connection with peers:", peers)
-	err := link.EnsureDirectLan(ctx, peers)
-	if err != nil {
-		return fmt.Errorf("failed to ensure direct LAN connection: %w", err)
-	}
-	d.Log.Info("Direct LAN connection established successfully")
-	d.lastSync = time.Now()
 	return nil
+	// err := link.EnsureDirectLan(ctx, peers)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to ensure direct LAN connection: %w", err)
+	// }
+	// d.Log.Info("Direct LAN connection established successfully")
+	// d.lastSync = time.Now()
+	// return nil
 }
 
 func (d *Daemon) syncPeers(ctx context.Context) (bool, error) {
