@@ -359,6 +359,7 @@ func (s *Server) listenAllUDP(ctx context.Context) error {
 }
 
 func (s *Server) listenUDPIface(ctx context.Context, iface string) error {
+	fmt.Println("hi")
 	log.GetLogger(ctx).Infof("Listening on UDP for interface %s", iface)
 	ifn, err := net.InterfaceByName(iface)
 	if err != nil {
