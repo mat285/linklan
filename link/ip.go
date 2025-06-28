@@ -7,8 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/mat285/linklan/config"
 	"github.com/mat285/linklan/log"
 )
 
@@ -95,15 +97,15 @@ func SetupDirectInterfaces(ctx context.Context, ifaces []string) error {
 	log.Default().Info("Found primary network IP:", primaryIP)
 	sort.Strings(ifaces)
 	iface := ifaces[0]
-	if err := AssignIPAndCidr(ctx, iface, primaryIP, len(ifaces) == 1 || iface == BondInterfaceName); err != nil {
+	if err := AssignIPAndCidr(ctx, iface, primaryIP, 0, len(ifaces) == 1 || iface == BondInterfaceName); err != nil {
 		return fmt.Errorf("failed to assign IP and CIDR for interface %s: %w", iface, err)
 	}
 	log.Default().Info("Assigned IP and CIDR for interface:", iface)
 	return nil
 }
 
-func AssignIPAndCidr(ctx context.Context, iface string, primaryIP string, cidr bool) error {
-	assigned, err := CheckSecondaryLanIp(ctx, iface, primaryIP)
+func AssignIPAndCidr(ctx context.Context, iface string, primaryIP string, index int, cidr bool) error {
+	assigned, err := CheckSecondaryLanIp(ctx, iface, primaryIP, index)
 	if err != nil {
 		return fmt.Errorf("failed to check secondary LAN IP: %w", err)
 	}
@@ -114,12 +116,12 @@ func AssignIPAndCidr(ctx context.Context, iface string, primaryIP string, cidr b
 		if err := SetInterfaceUp(ctx, iface); err != nil {
 			return fmt.Errorf("failed to set interface up: %w", err)
 		}
-		if err := AssignSecondaryLanIp(ctx, iface, primaryIP); err != nil {
+		if err := AssignSecondaryLanIp(ctx, iface, primaryIP, index); err != nil {
 			return fmt.Errorf("failed to assign lan ip: %w", err)
 		}
 	}
 	if cidr {
-		if err := AssignSecondaryLanCidrRoute(ctx, iface); err != nil {
+		if err := AssignSecondaryLanCidrRoute(ctx, iface, index); err != nil {
 			return fmt.Errorf("failed to assign lan routes: %w", err)
 		}
 	}
@@ -128,12 +130,46 @@ func AssignIPAndCidr(ctx context.Context, iface string, primaryIP string, cidr b
 
 func FindPrimaryNetworkIP(ctx context.Context) (string, error) {
 	log.Default().Info("Finding primary network IP")
-	return FindInterfaceIP(ctx, PrimaryLanIpPrefix, "")
+	prefix := PrimaryLanIpPrefix
+	cfg := config.GetConfig(ctx)
+	if cfg != nil && cfg.Lan.CIDR != "" {
+		log.Default().Info("Using configured primary network CIDR:", cfg.Lan.CIDR)
+		var err error
+		prefix, err = CIDRToPrefix(cfg.Lan.CIDR)
+		if err != nil {
+			return "", fmt.Errorf("failed to convert CIDR to prefix: %w", err)
+		}
+	}
+	return FindInterfaceIP(ctx, prefix, "")
 }
 
-func FindSecondaryNetworkIP(ctx context.Context, iface string) (string, error) {
+func FindSecondaryNetworkIP(ctx context.Context, iface string, index int) (string, error) {
 	log.Default().Info("Finding secondary network IP for interface:", iface)
-	return FindInterfaceIP(ctx, SecondaryLanIpPrefix, iface)
+	prefix := SecondaryLanIpPrefix
+	cfg := config.GetConfig(ctx)
+	if cfg != nil && len(cfg.Lan.CIDR) > 0 {
+		if index < 0 {
+			for i, ifce := range cfg.Interfaces {
+				if ifce.MatchesName(iface) {
+					index = i
+					break
+				}
+			}
+		}
+		if index < 0 {
+			return "", fmt.Errorf("index %d out of bounds for secondary CIDRs", index)
+		}
+		cidr, err := CIDRForIndex(cfg.Lan.CIDR, index)
+		if err != nil {
+			return "", fmt.Errorf("failed to get CIDR for index %d: %w", index, err)
+		}
+		log.Default().Info("Using configured secondary network CIDR:", cidr)
+		prefix, err = CIDRToPrefix(cidr)
+		if err != nil {
+			return "", fmt.Errorf("failed to convert CIDR to prefix: %w", err)
+		}
+	}
+	return FindInterfaceIP(ctx, prefix, iface)
 }
 
 func FindInterfaceIP(ctx context.Context, prefix string, iface string) (string, error) {
@@ -316,8 +352,8 @@ func FindInterfaceRoutes(ctx context.Context, iface string) ([]string, error) {
 	return routes, nil
 }
 
-func CheckSecondaryLanIp(ctx context.Context, interfaceName, primaryIP string) (bool, error) {
-	secondaryIP := SecondaryIPFromPrimaryIP(primaryIP)
+func CheckSecondaryLanIp(ctx context.Context, interfaceName, primaryIP string, index int) (bool, error) {
+	secondaryIP := SecondaryIPFromPrimaryIP(primaryIP, index)
 	parsedSecondaryIP := net.ParseIP(secondaryIP)
 	if parsedSecondaryIP == nil {
 		return false, fmt.Errorf("invalid secondary IP format: %s", secondaryIP)
@@ -357,8 +393,8 @@ func CheckSecondaryLanIp(ctx context.Context, interfaceName, primaryIP string) (
 	return false, nil
 }
 
-func AssignSecondaryLanIp(ctx context.Context, interfaceName string, primaryIP string) error {
-	secondaryIP := SecondaryIPFromPrimaryIP(primaryIP)
+func AssignSecondaryLanIp(ctx context.Context, interfaceName string, primaryIP string, index int) error {
+	secondaryIP := SecondaryIPFromPrimaryIP(primaryIP, index)
 	log.Default().Info("Assigning secondary LAN IP", secondaryIP, "to interface", interfaceName)
 	_, err := ExecIPCommand(ctx, "addr", "add", secondaryIP, "dev", interfaceName)
 	return err
@@ -373,7 +409,7 @@ func CheckSecondaryLanCidrRoute(ctx context.Context, interfaceName string) (bool
 	return exists, nil
 }
 
-func AssignSecondaryLanCidrRoute(ctx context.Context, interfaceName string) error {
+func AssignSecondaryLanCidrRoute(ctx context.Context, interfaceName string, index int) error {
 	exists, err := CheckSecondaryLanCidrRoute(ctx, interfaceName)
 	if err != nil {
 		return fmt.Errorf("failed to check secondary LAN CIDR route: %w", err)
@@ -419,9 +455,11 @@ func ExecIPCommand(ctx context.Context, args ...string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
-func SecondaryIPFromPrimaryIP(primaryIP string) string {
-	secondaryIP := fmt.Sprintf("%s%s", SecondaryLanIpPrefix, strings.TrimPrefix(primaryIP, PrimaryLanIpPrefix))
-	return secondaryIP
+func SecondaryIPFromPrimaryIP(primaryIP string, index int) string {
+	ip, _ := CIDRForIndex(primaryIP, index)
+	return ip
+	// secondaryIP := fmt.Sprintf("%s%s", , strings.TrimPrefix(primaryIP, PrimaryLanIpPrefix))
+	// return secondaryIP
 }
 
 func StringSet(s []string) map[string]struct{} {
@@ -430,4 +468,98 @@ func StringSet(s []string) map[string]struct{} {
 		set[v] = struct{}{}
 	}
 	return set
+}
+
+func CIDRToPrefix(cidr string) (string, error) {
+	ip, ipNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return "", fmt.Errorf("invalid CIDR format: %w", err)
+	}
+	bits, _ := ipNet.Mask.Size()
+	switch bits {
+	case 8, 16, 24:
+		take := (bits / 8)
+		ret := ip.String()
+		count := 0
+		i := 0
+		for count < take {
+			if ret[i] == '.' {
+				count++
+			}
+			i++
+		}
+		return ret[:i], nil
+	default:
+		return "", fmt.Errorf("unsupported CIDR size: %d bits", bits)
+	}
+}
+
+func CIDRSize(cidr string) (int, error) {
+	_, ipNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return -1, fmt.Errorf("invalid CIDR format: %w", err)
+	}
+	bits, _ := ipNet.Mask.Size()
+	return bits, nil
+}
+
+func PartialIPString(ip string, size int) (string, error) {
+	if size == 0 {
+		return "", nil
+	}
+	if size < 1 || size > 4 {
+		return "", fmt.Errorf("size must be between 1 and 4")
+	}
+	parts := strings.Split(ip, ".")
+	if len(parts) != 4 {
+		return "", fmt.Errorf("invalid IP format: %s", ip)
+	}
+	return strings.Join(parts[:size], "."), nil
+}
+
+func CIDRLastSpecified(cidr string) (int, error) {
+	size, err := CIDRSize(cidr)
+	if err != nil {
+		return -1, fmt.Errorf("failed to get CIDR size: %w", err)
+	}
+	parts := strings.Split(cidr, ".")
+	if len(parts) != 4 {
+		return -1, fmt.Errorf("invalid CIDR format: %s", cidr)
+	}
+	idx := size/8 - 1
+	return strconv.Atoi(parts[idx])
+}
+
+func CIDRForIndex(primary string, idx int) (string, error) {
+	size, err := CIDRSize(primary)
+	if err != nil {
+		return "", fmt.Errorf("failed to get CIDR size: %w", err)
+	}
+	count := size/8 - 1
+	primaryIP, err := PartialIPString(primary, count)
+	if err != nil {
+		return "", fmt.Errorf("failed to get partial primary IP string: %w", err)
+	}
+	lastPrimary, err := CIDRLastSpecified(primary)
+	if err != nil {
+		return "", fmt.Errorf("failed to get last specified CIDR: %w", err)
+	}
+	fmt.Println("Last primary:", lastPrimary, "Index:", idx, "Size:", size, "Count:", count)
+	if size == 8 {
+		idx++
+	}
+	if idx >= lastPrimary {
+		idx = lastPrimary + idx
+	}
+	if len(primaryIP) > 0 {
+		primaryIP += "."
+	}
+	cidr := fmt.Sprintf("%s%d", primaryIP, idx)
+	count++
+	for count < 4 {
+		cidr += ".0"
+		count++
+	}
+	cidr += fmt.Sprintf("/%d", size)
+	return cidr, nil
 }

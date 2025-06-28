@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mat285/linklan/config"
 	"github.com/mat285/linklan/discover"
 	"github.com/mat285/linklan/link"
 	"github.com/mat285/linklan/log"
@@ -21,6 +22,8 @@ const (
 )
 
 type Daemon struct {
+	Config config.Config
+
 	lock   sync.Mutex
 	cancel context.CancelFunc
 
@@ -36,12 +39,17 @@ type Daemon struct {
 	Server *discover.Server
 }
 
-func New() *Daemon {
+func New(ctx context.Context) (*Daemon, error) {
+	cfg := config.GetConfig(ctx)
+	if cfg == nil {
+		return nil, fmt.Errorf("no configuration found in context")
+	}
 	d := &Daemon{
-		Log: log.New(),
+		Config: *cfg,
+		Log:    log.New(),
 	}
 	d.Watcher = link.NewDeviceWatcher(d.onInterfaceChange)
-	return d
+	return d, nil
 }
 
 func (d *Daemon) Start(ctx context.Context) error {
@@ -53,7 +61,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	d.cancel = cancel
-	d.Server = discover.NewServer(link.SecondaryIPFromPrimaryIP(d.LocalIP), 11221)
+	d.Server = discover.NewServer(link.SecondaryIPFromPrimaryIP(d.LocalIP, 0), 11221)
 	d.lock.Unlock()
 	var wg sync.WaitGroup
 

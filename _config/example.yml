@@ -1,0 +1,19 @@
+lan:
+  cidr: 10.1.0.0/16
+  # secondaryCidrs:
+  #   - 192.168.0.0/24
+
+interfaces:
+    - name: enp3s0
+      priority: 100
+
+    - match:
+        name: enp1s0f*
+      priority: 1
+      disabled: true
+
+routing:
+  additionalCidrs:
+    - 192.168.1.0/24
+    - 192.168.2.0/24
+    - 192.168.3.0/24

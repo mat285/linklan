@@ -55,7 +55,7 @@ func GetActiveKubePeers(ctx context.Context, localIP string) ([]string, error) {
 		wg.Add(1)
 		go func(ip string) {
 			defer wg.Done()
-			err := TCPPing(ctx, link.SecondaryIPFromPrimaryIP(ip), 16443)
+			err := TCPPing(ctx, link.SecondaryIPFromPrimaryIP(ip, 0), 16443)
 			if err == nil {
 				lock.Lock()
 				filteredIPs = append(filteredIPs, ip)
