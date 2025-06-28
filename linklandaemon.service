@@ -10,7 +10,7 @@ SyslogIdentifier=linklandaemon
 User=root
 Group=root
 Environment=PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin:/snap/bin
-ExecStart=/bin/linklandaemon
+ExecStart=/bin/linklandaemon --config-path=/etc/linklandaemon/config.yml
 Restart=always
 ExecReload=/bin/kill -HUP $MAINPID
 

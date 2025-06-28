@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mat285/linklan/config"
+	"github.com/mat285/linklan/link"
 	"github.com/mat285/linklan/log"
 )
 
@@ -40,7 +42,7 @@ type Server struct {
 	done   chan struct{}
 
 	peersLock sync.Mutex
-	peers     map[byte]map[byte]net.Conn
+	peers     map[[4]byte]net.Conn
 
 	knownPeersLock sync.Mutex
 	knownPeers     map[string]struct{} // Track known peers to avoid duplicates
@@ -50,7 +52,7 @@ func NewServer(ip string, port int) *Server {
 	return &Server{
 		IP:             ip,
 		Port:           port,
-		peers:          make(map[byte]map[byte]net.Conn),
+		peers:          make(map[[4]byte]net.Conn),
 		knownPeers:     make(map[string]struct{}),
 		peersLock:      sync.Mutex{},
 		knownPeersLock: sync.Mutex{},
@@ -69,7 +71,7 @@ func (s *Server) Start(ctx context.Context) error {
 		s.lock.Unlock()
 		return fmt.Errorf("server already running")
 	}
-	log.Default().Info("Starting server on", s.IP, ":", s.Port)
+	log.GetLogger(ctx).Info("Starting server on", s.IP, ":", s.Port)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	s.cancel = cancel
@@ -81,29 +83,33 @@ func (s *Server) Start(ctx context.Context) error {
 	err := s.Listen(ctx)
 	cancel()
 	close(done)
-	log.Default().Info("Server stopped")
+	log.GetLogger(ctx).Info("Server stopped")
 	return err
 }
 
-func (s *Server) ActivePeers() []string {
+func (s *Server) ActivePeers(ctx context.Context) []string {
+	localIP, _, err := net.ParseCIDR(config.GetConfig(ctx).Lan.CIDR)
+	if err != nil {
+		log.GetLogger(context.Background()).Errorf("Failed to parse local CIDR: %v", err)
+		return nil
+	}
+	localIP = localIP.To4()
+
 	s.peersLock.Lock()
 	defer s.peersLock.Unlock()
-	ip := net.ParseIP(s.IP)
-	ip[len(ip)-2] = 1
 	peers := make([]string, 0, len(s.peers))
-	for ipID, lanMap := range s.peers {
-		for range lanMap {
-			ip[len(ip)-1] = ipID
-			peer := ip.String()
-			peers = append(peers, peer)
-		}
+	for ip := range s.peers {
+		peer := make(net.IP, len(localIP))
+		copy(peer, localIP)
+		peer[len(peer)-1] = ip[len(ip)-1] // Use the last byte of local IP for the peer
+		peers = append(peers, peer.String())
 	}
 	return peers
 }
 
 func (s *Server) SearchForPeers(ctx context.Context) error {
 	lan := byte(0)
-	log.Default().Info("Starting peer search on LAN ID", lan)
+	log.GetLogger(ctx).Info("Starting peer search on LAN ID", lan)
 	for {
 		select {
 		case <-ctx.Done():
@@ -112,9 +118,9 @@ func (s *Server) SearchForPeers(ctx context.Context) error {
 		}
 		err := s.searchWholeLan(ctx, lan)
 		if err != nil {
-			log.Default().Info("Error searching LAN:", err)
+			log.GetLogger(ctx).Info("Error searching LAN:", err)
 		}
-		log.Default().Info("Completed peer search cycle, waiting for next cycle")
+		log.GetLogger(ctx).Info("Completed peer search cycle, waiting for next cycle")
 
 		select {
 		case <-ctx.Done():
@@ -125,9 +131,20 @@ func (s *Server) SearchForPeers(ctx context.Context) error {
 }
 
 func (s *Server) searchWholeLan(ctx context.Context, lan byte) error {
-	log.Default().Info("Searching whole LAN with ID", lan)
-	localIP := net.ParseIP(s.IP)
+	var err error
+	log.GetLogger(ctx).Info("Searching whole LAN with ID", lan)
+	localIP := net.ParseIP(s.IP).To4()
+	cfg := config.GetConfig(ctx)
+	if cfg != nil {
+		localIP, _, err = link.IPForIndex(cfg.Lan.CIDR, lan)
+		if err != nil {
+			return fmt.Errorf("failed to get local IP for LAN ID %d: %w", lan, err)
+		}
+	}
+	log.GetLogger(ctx).Infof("Using local IP %s for lan index %d", localIP, lan)
 	localID := localIP[len(localIP)-1]
+	pingIP := make(net.IP, len(localIP))
+	copy(pingIP, localIP)
 	for i := 0; i <= 255; i++ {
 		ipID := byte(i)
 		if ipID == localID {
@@ -139,17 +156,15 @@ func (s *Server) searchWholeLan(ctx context.Context, lan byte) error {
 		default:
 		}
 		s.peersLock.Lock()
-		if _, exists := s.peers[ipID]; !exists {
-			s.peers[ipID] = make(map[byte]net.Conn)
-		}
-		_, exists := s.peers[ipID][lan]
+		_, exists := s.peers[[4]byte(pingIP)]
 		s.peersLock.Unlock()
 
 		if !exists {
-			log.Default().Debug("Trying to ping peer with IP ID", ipID, "and LAN ID", lan)
-			err := s.tryPingPeer(ctx, ipID, lan, s.Port)
+			pingIP[len(pingIP)-1] = byte(i)
+			log.GetLogger(ctx).Debugf("Trying to ping peer with IP %s Lan %d", pingIP, lan)
+			err := s.tryPingPeer(ctx, pingIP, s.Port)
 			if err != nil {
-				log.Default().Debug("Failed to ping peer with IP ID", ipID, "and LAN ID", lan, ":", err)
+				log.GetLogger(ctx).Debugf("Failed to ping peer with IP %s: %v", pingIP, err)
 			}
 		}
 	}
@@ -164,9 +179,9 @@ func (s *Server) Listen(ctx context.Context) error {
 	defer listener.Close()
 	go func() {
 		<-ctx.Done()
-		log.Default().Info("Stopping listener")
+		log.GetLogger(ctx).Info("Stopping listener")
 		if err := listener.Close(); err != nil {
-			log.Default().Error("Error closing listener:", err)
+			log.GetLogger(ctx).Errorf("Error closing listener: %v", err)
 		}
 	}()
 	for {
@@ -177,7 +192,7 @@ func (s *Server) Listen(ctx context.Context) error {
 		}
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Default().Info("Error accepting connection:", err)
+			log.GetLogger(ctx).Info("Error accepting connection:", err)
 		}
 		go s.handleConnection(ctx, conn)
 	}
@@ -190,15 +205,11 @@ func (s *Server) Stop() {
 	if s.done != nil {
 		<-s.done
 	}
-	log.Default().Info("Server stopped")
 }
 
-func (s *Server) tryPingPeer(ctx context.Context, ipID, lanID byte, port int) error {
-	ip := net.ParseIP(s.IP)
-	ip[len(ip)-1] = ipID
-	log.Default().Debug("Pinging peer at", ip, "on port", port)
+func (s *Server) tryPingPeer(ctx context.Context, ip net.IP, port int) error {
+	log.GetLogger(ctx).Debug("Pinging peer at", ip, "on port", port)
 	addr := net.JoinHostPort(ip.String(), fmt.Sprintf("%d", port))
-	ip[len(ip)-2] = lanID
 	conn, err := net.DialTimeout("tcp4", addr, DialTimeout)
 	if err != nil {
 		return fmt.Errorf("failed to connect to %s: %w", addr, err)
@@ -207,8 +218,8 @@ func (s *Server) tryPingPeer(ctx context.Context, ipID, lanID byte, port int) er
 	return nil
 }
 
-func (s *Server) tryReconnect(ctx context.Context, ipID, lanID byte) error {
-	log.Default().Info("Attempting to reconnect to peer with IP ID", ipID, "and LAN ID", lanID)
+func (s *Server) tryReconnect(ctx context.Context, ip net.IP) error {
+	log.GetLogger(ctx).Info("Attempting to reconnect to peer with IP ID", ip)
 	maxAttempts := 3
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		select {
@@ -218,67 +229,64 @@ func (s *Server) tryReconnect(ctx context.Context, ipID, lanID byte) error {
 		}
 
 		s.lock.Lock()
-		if _, exists := s.peers[ipID]; !exists {
-			s.peers[ipID] = make(map[byte]net.Conn)
-		}
-		_, exists := s.peers[ipID][lanID]
+		_, exists := s.peers[[4]byte(ip)]
 		s.lock.Unlock()
 
 		if exists {
-			log.Default().Debugf("Connection to peer with IP ID %d and LAN ID %d already exists, skipping reconnect", ipID, lanID)
+			log.GetLogger(ctx).Debugf("Connection to peer with IP %s  already exists, skipping reconnect", ip)
 			return nil
 		}
 
-		ip := net.ParseIP(s.IP)
-		ip[len(ip)-1] = ipID
-		ip[len(ip)-2] = lanID
 		addr := net.JoinHostPort(ip.String(), fmt.Sprintf("%d", s.Port))
-		log.Default().Debug("Reconnecting to peer at", addr)
+		log.GetLogger(ctx).Debug("Reconnecting to peer at", addr)
 		conn, err := net.DialTimeout("tcp4", addr, DialTimeout)
 		if err == nil {
-			log.Default().Debugf("Successfully reconnected to peer at %s", addr)
+			log.GetLogger(ctx).Debugf("Successfully reconnected to peer at %s", addr)
 			go s.handleConnection(ctx, conn)
 			return nil
 		}
-		log.Default().Debugf("Failed to reconnect to peer at %s: %v", addr, err)
+		log.GetLogger(ctx).Debugf("Failed to reconnect to peer at %s: %v", addr, err)
 	}
-	return fmt.Errorf("failed to reconnect to peer with IP ID %d and LAN ID %d after %d attempts", ipID, lanID, maxAttempts)
+	return fmt.Errorf("failed to reconnect to peer with IP %s after %d attempts", ip, maxAttempts)
 }
 
 func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	ip := addressToIP(conn.RemoteAddr().String())
-	ipID := ip[len(ip)-1]
-	lanID := ip[len(ip)-2]
+	log.GetLogger(ctx).Debugf("Handling connection from %s", ip)
+	defer func() { go s.tryReconnect(ctx, ip) }() // Attempt to reconnect if the connection is closed unexpectedly
+	s.addNewConn(ctx, conn)
+	defer s.cleanupConn(ctx, conn)
+	s.handleConnRW(ctx, conn)
+}
 
-	s.knownPeersLock.Lock()
-	s.knownPeers[ip.String()] = struct{}{}
-	s.knownPeersLock.Unlock()
+func (s *Server) addNewConn(ctx context.Context, conn net.Conn) {
+	ip := addressToIP(conn.RemoteAddr().String())
 
 	s.peersLock.Lock()
-	if s.peers[ipID] == nil {
-		s.peers[ipID] = make(map[byte]net.Conn)
-	}
+	defer s.peersLock.Unlock()
+	s.knownPeersLock.Lock()
+	defer s.knownPeersLock.Unlock()
+	s.knownPeers[ip.String()] = struct{}{}
 
-	if _, exists := s.peers[ipID][lanID]; exists {
-		log.Default().Infof("Connection from %s on LAN %d already exists, closing duplicate connection", ip, lanID)
+	if curr, exists := s.peers[[4]byte(ip)]; exists {
+		log.GetLogger(ctx).Infof("Connection from %s already exists, closing older connection", ip)
+		curr.Close()
+	}
+	log.GetLogger(ctx).Infof("Adding new peer connection from %s", ip)
+	s.peers[[4]byte(ip)] = conn
+}
+
+func (s *Server) cleanupConn(ctx context.Context, conn net.Conn) {
+	ip := [4]byte(addressToIP(conn.RemoteAddr().String()))
+
+	s.peersLock.Lock()
+	defer s.peersLock.Unlock()
+	if s.peers[ip] != conn {
 		return
 	}
-
-	s.peers[ipID][lanID] = conn
-	s.peersLock.Unlock()
-
-	defer func() {
-		s.peersLock.Lock()
-		delete(s.peers[ipID], lanID)
-		if len(s.peers[ipID]) == 0 {
-			delete(s.peers, ipID)
-		}
-		s.peersLock.Unlock()
-	}()
-
-	s.handleConnRW(ctx, conn)
-	go s.tryReconnect(ctx, ipID, lanID)
+	log.GetLogger(ctx).Infof("Removing closed peer connection from %s", ip)
+	delete(s.peers, ip)
 }
 
 func (s *Server) handleConnRW(ctx context.Context, conn net.Conn) {
@@ -291,7 +299,7 @@ func (s *Server) handleConnRW(ctx context.Context, conn net.Conn) {
 		defer cancel()
 		wErr = s.writeConn(ctx, conn)
 		if wErr != nil {
-			log.Default().Errorf("Error during write speed test: %v", wErr)
+			log.GetLogger(ctx).Errorf("Error during write speed test: %v", wErr)
 		}
 	}(&wg)
 	go func(wg *sync.WaitGroup) {
@@ -299,7 +307,7 @@ func (s *Server) handleConnRW(ctx context.Context, conn net.Conn) {
 		defer cancel()
 		rErr = s.readConn(ctx, conn)
 		if rErr != nil {
-			log.Default().Errorf("Error reading from connection: %v", rErr)
+			log.GetLogger(ctx).Errorf("Error reading from connection: %v", rErr)
 		}
 	}(&wg)
 	wg.Wait()
@@ -340,7 +348,7 @@ func (s *Server) readConn(ctx context.Context, conn net.Conn) error {
 		conn.SetReadDeadline(time.Now().Add(2 * PingInterval))
 		_, err := conn.Read(buffer)
 		if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) && !errors.Is(err, io.EOF) {
-			log.Default().Info("Error reading from connection:", err)
+			log.GetLogger(ctx).Info("Error reading from connection:", err)
 			return err
 		}
 	}
@@ -360,5 +368,5 @@ func calculateSpeed(sent int64, start time.Time) (float64, int64) {
 func addressToIP(addr string) net.IP {
 	host, _, _ := net.SplitHostPort(addr)
 	ip := net.ParseIP(host)
-	return ip
+	return ip.To4()
 }

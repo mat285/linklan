@@ -46,7 +46,7 @@ func New(ctx context.Context) (*Daemon, error) {
 	}
 	d := &Daemon{
 		Config: *cfg,
-		Log:    log.New(),
+		Log:    log.GetLogger(ctx),
 	}
 	d.Watcher = link.NewDeviceWatcher(d.onInterfaceChange)
 	return d, nil
@@ -61,7 +61,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	d.cancel = cancel
-	d.Server = discover.NewServer(link.SecondaryIPFromPrimaryIP(d.LocalIP, 0), 11221)
+	d.Server = discover.NewServer("0.0.0.0", 11221)
 	d.lock.Unlock()
 	var wg sync.WaitGroup
 
@@ -69,7 +69,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 	go func() {
 		defer wg.Done()
 		d.Watcher.Start(ctx)
-		log.Default().Info("Device watcher Stopped")
+		log.GetLogger(ctx).Info("Device watcher Stopped")
 	}()
 	defer d.Watcher.Stop()
 
@@ -85,7 +85,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 				d.cancel = nil
 			}
 		}
-		log.Default().Info("Server stopped")
+		log.GetLogger(ctx).Info("Server stopped")
 	}()
 	defer d.Server.Stop()
 
@@ -172,7 +172,7 @@ func (d *Daemon) runSync(ctx context.Context) error {
 
 func (d *Daemon) ensureLanUnsafe(ctx context.Context) error {
 	peers := d.Peers
-	log.Default().Info("Ensuring direct LAN connection with peers:", peers)
+	log.GetLogger(ctx).Info("Ensuring direct LAN connection with peers:", peers)
 	err := link.EnsureDirectLan(ctx, peers)
 	if err != nil {
 		return fmt.Errorf("failed to ensure direct LAN connection: %w", err)
@@ -191,7 +191,7 @@ func (d *Daemon) syncPeers(ctx context.Context) (bool, error) {
 	// if err != nil {
 	// 	return false, err
 	// }
-	peers := d.Server.ActivePeers()
+	peers := d.Server.ActivePeers(ctx)
 	sort.Strings(peers)
 
 	needsSync := len(peers) != len(d.Peers)
@@ -215,18 +215,18 @@ func (d *Daemon) syncPeers(ctx context.Context) (bool, error) {
 }
 
 func (d *Daemon) onInterfaceChange(ctx context.Context, iface net.Interface, mode link.EventMode) error {
-	log.Default().Info("Interface change detected:", iface.Name, "Mode:", mode)
+	log.GetLogger(ctx).Info("Interface change detected:", iface.Name, "Mode:", mode)
 	if mode != link.ModeCreate {
-		log.Default().Info("Skipping interface", iface.Name, "for mode", mode)
+		log.GetLogger(ctx).Info("Skipping interface", iface.Name, "for mode", mode)
 		return nil
 	}
 
-	valid, _, err := link.IsSecondaryNetworkInterface(iface)
+	valid, _, err := link.IsSecondaryNetworkInterface(ctx, iface)
 	if err != nil {
 		return fmt.Errorf("failed to check if interface %s is a secondary network interface: %w", iface.Name, err)
 	}
 	if !valid {
-		log.Default().Info("Interface", iface.Name, "is not a secondary network interface, skipping")
+		log.GetLogger(ctx).Info("Interface", iface.Name, "is not a secondary network interface, skipping")
 		return nil
 	}
 	return d.ensureLanUnsafe(ctx)

@@ -7,24 +7,19 @@ import (
 	"strings"
 )
 
-var (
-	defaultLogger = New()
-)
-
 type Logger struct {
 	*slog.Logger
 }
 
-func New() *Logger {
-	sl := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+func New(cfg Config) *Logger {
+	sl := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.SlogLevel()}))
 	return &Logger{sl}
 }
 
-func Default() *Logger {
-	return defaultLogger
-}
-
 func (l *Logger) Info(msg string, msgs ...any) {
+	if l == nil {
+		return
+	}
 	strs := make([]string, 0, len(msgs)+1)
 	strs = append(strs, msg)
 	for _, m := range msgs {
@@ -46,6 +41,9 @@ func (l *Logger) Warnf(format string, args ...any) {
 }
 
 func (l *Logger) Debug(msg string, msgs ...any) {
+	if l == nil {
+		return
+	}
 	strs := make([]string, 0, len(msgs)+1)
 	strs = append(strs, msg)
 	for _, m := range msgs {

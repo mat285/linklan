@@ -1,9 +1,9 @@
-VERSION ?= v0.2.1
+VERSION ?= v0.3.0
 GIT_SHA ?= $(shell git log --pretty=format:'%H' -n 1 2> /dev/null | cut -c1-8)
 
 .PHONY: release-all
 release-all: release
-	VERSION=${VERSION} go run cmd/update/main.go
+	VERSION=${VERSION} go run cmd/update/main.go ${VERSION}
 
 .PHONY: release
 release: build push-files

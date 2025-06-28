@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/mat285/linklan/config"
@@ -36,12 +35,12 @@ func EnsureDirectLan(ctx context.Context, peers []string) error {
 		return fmt.Errorf("failed to setup direct interfaces: %w", err)
 	}
 	if len(peers) != 0 {
-		log.Default().Info("Setting up direct routes for peers:", peers)
+		log.GetLogger(ctx).Info("Setting up direct routes for peers:", peers)
 		if err := SetDirectRoutes(ctx, ifaces, peers); err != nil {
 			return fmt.Errorf("failed to set direct routes: %w", err)
 		}
 	}
-	log.Default().Info("Direct LAN setup completed successfully")
+	log.GetLogger(ctx).Info("Direct LAN setup completed successfully")
 	return nil
 }
 
@@ -59,15 +58,15 @@ func SetDirectRoutes(ctx context.Context, ifaces []string, peers []string) error
 		_, has := existingSet[peer]
 		delete(existingSet, peer)
 		if has {
-			log.Default().Infof("Route %s already exists for interface %s, skipping\n", peer, iface)
+			log.GetLogger(ctx).Infof("Route %s already exists for interface %s, skipping\n", peer, iface)
 			continue
 		}
-		log.Default().Infof("Route %s does not exist for interface %s, adding\n", peer, iface)
+		log.GetLogger(ctx).Infof("Route %s does not exist for interface %s, adding\n", peer, iface)
 		toAdd = append(toAdd, peer)
 	}
 
 	for route := range existingSet {
-		log.Default().Infof("Route %s exists for interface %s, removing\n", route, iface)
+		log.GetLogger(ctx).Infof("Route %s exists for interface %s, removing\n", route, iface)
 		toDelete = append(toDelete, route)
 	}
 
@@ -81,7 +80,7 @@ func SetDirectRoutes(ctx context.Context, ifaces []string, peers []string) error
 			return fmt.Errorf("failed to add route %s for interface %s: %w", route, iface, err)
 		}
 	}
-	log.Default().Infof("Successfully updated routes for interface %s: added %d, removed %d\n", iface, len(toAdd), len(toDelete))
+	log.GetLogger(ctx).Infof("Successfully updated routes for interface %s: added %d, removed %d\n", iface, len(toAdd), len(toDelete))
 	return nil
 }
 
@@ -89,22 +88,22 @@ func SetupDirectInterfaces(ctx context.Context, ifaces []string) error {
 	if len(ifaces) == 0 {
 		return fmt.Errorf("no secondary network interfaces found")
 	}
-	log.Default().Info("Found secondary network interface:", ifaces)
+	log.GetLogger(ctx).Info("Found secondary network interface:", ifaces)
 	primaryIP, err := FindPrimaryNetworkIP(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to find primary network IP: %w", err)
 	}
-	log.Default().Info("Found primary network IP:", primaryIP)
+	log.GetLogger(ctx).Info("Found primary network IP:", primaryIP)
 	sort.Strings(ifaces)
 	iface := ifaces[0]
 	if err := AssignIPAndCidr(ctx, iface, primaryIP, 0, len(ifaces) == 1 || iface == BondInterfaceName); err != nil {
 		return fmt.Errorf("failed to assign IP and CIDR for interface %s: %w", iface, err)
 	}
-	log.Default().Info("Assigned IP and CIDR for interface:", iface)
+	log.GetLogger(ctx).Info("Assigned IP and CIDR for interface:", iface)
 	return nil
 }
 
-func AssignIPAndCidr(ctx context.Context, iface string, primaryIP string, index int, cidr bool) error {
+func AssignIPAndCidr(ctx context.Context, iface string, primaryIP string, index byte, cidr bool) error {
 	assigned, err := CheckSecondaryLanIp(ctx, iface, primaryIP, index)
 	if err != nil {
 		return fmt.Errorf("failed to check secondary LAN IP: %w", err)
@@ -129,11 +128,11 @@ func AssignIPAndCidr(ctx context.Context, iface string, primaryIP string, index 
 }
 
 func FindPrimaryNetworkIP(ctx context.Context) (string, error) {
-	log.Default().Info("Finding primary network IP")
+	log.GetLogger(ctx).Info("Finding primary network IP")
 	prefix := PrimaryLanIpPrefix
 	cfg := config.GetConfig(ctx)
 	if cfg != nil && cfg.Lan.CIDR != "" {
-		log.Default().Info("Using configured primary network CIDR:", cfg.Lan.CIDR)
+		log.GetLogger(ctx).Info("Using configured primary network CIDR:", cfg.Lan.CIDR)
 		var err error
 		prefix, err = CIDRToPrefix(cfg.Lan.CIDR)
 		if err != nil {
@@ -144,7 +143,7 @@ func FindPrimaryNetworkIP(ctx context.Context) (string, error) {
 }
 
 func FindSecondaryNetworkIP(ctx context.Context, iface string, index int) (string, error) {
-	log.Default().Info("Finding secondary network IP for interface:", iface)
+	log.GetLogger(ctx).Info("Finding secondary network IP for interface:", iface)
 	prefix := SecondaryLanIpPrefix
 	cfg := config.GetConfig(ctx)
 	if cfg != nil && len(cfg.Lan.CIDR) > 0 {
@@ -159,11 +158,11 @@ func FindSecondaryNetworkIP(ctx context.Context, iface string, index int) (strin
 		if index < 0 {
 			return "", fmt.Errorf("index %d out of bounds for secondary CIDRs", index)
 		}
-		cidr, err := CIDRForIndex(cfg.Lan.CIDR, index)
+		cidr, err := CIDRForIndex(cfg.Lan.CIDR, byte(index))
 		if err != nil {
 			return "", fmt.Errorf("failed to get CIDR for index %d: %w", index, err)
 		}
-		log.Default().Info("Using configured secondary network CIDR:", cidr)
+		log.GetLogger(ctx).Info("Using configured secondary network CIDR:", cidr)
 		prefix, err = CIDRToPrefix(cidr)
 		if err != nil {
 			return "", fmt.Errorf("failed to convert CIDR to prefix: %w", err)
@@ -173,7 +172,7 @@ func FindSecondaryNetworkIP(ctx context.Context, iface string, index int) (strin
 }
 
 func FindInterfaceIP(ctx context.Context, prefix string, iface string) (string, error) {
-	log.Default().Info("Finding IP for prefix", prefix, "with interface:", iface)
+	log.GetLogger(ctx).Info("Finding IP for prefix", prefix, "with interface:", iface)
 	args := []string{
 		"addr",
 		"show",
@@ -200,8 +199,8 @@ func FindInterfaceIP(ctx context.Context, prefix string, iface string) (string, 
 }
 
 func FindSecondaryNetworkInterface(ctx context.Context) ([]string, error) {
-	log.Default().Info("Finding secondary network interfaces...")
-	_, ifaces, err := FindPhysicalInterfaces()
+	log.GetLogger(ctx).Info("Finding secondary network interfaces...")
+	_, ifaces, err := FindPhysicalInterfaces(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find physical interfaces: %w", err)
 	}
@@ -212,31 +211,31 @@ func FindSecondaryNetworkInterface(ctx context.Context) ([]string, error) {
 	for i, iface := range ifaces {
 		strs[i] = iface.Name
 	}
-	log.Default().Info("Found secondary network interfaces:", strs)
+	log.GetLogger(ctx).Info("Found secondary network interfaces:", strs)
 	return strs, nil
 }
 
-func FindPhysicalInterfaces() (primary *net.Interface, filtered []net.Interface, err error) {
+func FindPhysicalInterfaces(ctx context.Context) (primary *net.Interface, filtered []net.Interface, err error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get network interfaces: %w", err)
 	}
-	log.Default().Info("Found network interfaces:", len(ifaces))
+	log.GetLogger(ctx).Info("Found network interfaces:", len(ifaces))
 	for _, iface := range ifaces {
-		valid, prime, err := IsSecondaryNetworkInterface(iface)
+		valid, prime, err := IsSecondaryNetworkInterface(ctx, iface)
 		if err != nil {
-			log.Default().Info("Error checking interface:", iface.Name, err)
+			log.GetLogger(ctx).Info("Error checking interface:", iface.Name, err)
 			continue
 		}
 		if prime != nil {
 			if primary != nil {
-				log.Default().Info("Multiple primary interfaces found, skipping:", iface.Name)
+				log.GetLogger(ctx).Info("Multiple primary interfaces found, skipping:", iface.Name)
 				continue // Skip if we already found a primary
 			}
 			primary = prime
 		}
 		if !valid {
-			log.Default().Debugf("Skipping interface:", iface.Name)
+			log.GetLogger(ctx).Debugf("Skipping interface:", iface.Name)
 			continue
 		}
 		filtered = append(filtered, iface)
@@ -247,36 +246,43 @@ func FindPhysicalInterfaces() (primary *net.Interface, filtered []net.Interface,
 	return primary, filtered, nil
 }
 
-func IsSecondaryNetworkInterface(iface net.Interface) (bool, *net.Interface, error) {
+func IsSecondaryNetworkInterface(ctx context.Context, iface net.Interface) (bool, *net.Interface, error) {
 	if iface.Flags&net.FlagLoopback != 0 {
-		log.Default().Debugf("Skipping loopback interface:", iface.Name)
+		log.GetLogger(ctx).Debug("Skipping loopback interface:", iface.Name)
 		return false, nil, nil
 	}
 	if IsFilteredInterface(iface) {
-		log.Default().Debugf("Skipping known virtual interface:", iface.Name)
+		log.GetLogger(ctx).Debug("Skipping known virtual interface:", iface.Name)
 		return false, nil, nil
 	}
 	isHardware, err := IsHardwareInterface(iface)
 	if err != nil {
-		log.Default().Info("Error checking if interface is hardware:", iface.Name, err)
+		log.GetLogger(ctx).Info("Error checking if interface is hardware:", iface.Name, err)
 		return false, nil, err
 	}
 	if !isHardware {
-		log.Default().Debugf("Skipping non-hardware interface:", iface.Name)
+		log.GetLogger(ctx).Debug("Skipping non-hardware interface:", iface.Name)
 		return false, nil, nil
+	}
+	for _, ifc := range config.GetConfig(ctx).Interfaces {
+		log.GetLogger(ctx).Debugf("Checking interface %s against config interface %v", iface.Name, ifc)
+		if ifc.MatchesName(iface.Name) && ifc.Disabled {
+			log.GetLogger(ctx).Info("Skipping disabled interface:", iface.Name)
+			return false, nil, nil
+		}
 	}
 	addrs, err := iface.Addrs()
 	if err != nil {
-		log.Default().Info("Error getting addresses for interface:", iface.Name, err)
+		log.GetLogger(ctx).Info("Error getting addresses for interface:", iface.Name, err)
 		return false, nil, err
 	}
 	for _, addr := range addrs {
 		if strings.HasPrefix(addr.String(), PrimaryLanIpPrefix) {
-			log.Default().Info("Found primary network interface:", iface.Name)
+			log.GetLogger(ctx).Info("Found primary network interface:", iface.Name)
 			return false, &iface, nil // This is the primary interface
 		}
 	}
-	log.Default().Info("Including hardware interface:", iface.Name)
+	log.GetLogger(ctx).Info("Including hardware interface:", iface.Name)
 	return true, nil, nil // This is a secondary interface
 }
 
@@ -310,7 +316,7 @@ func IsFilteredInterface(iface net.Interface) bool {
 	}
 	for _, prefix := range virtualIfacePrefixes {
 		if strings.HasPrefix(iface.Name, prefix) {
-			log.Default().Debugf("Skipping known virtual interface:", iface.Name)
+			// log.GetLogger(ctx).Debugf("Skipping known virtual interface:", iface.Name)
 			return true
 		}
 	}
@@ -330,7 +336,7 @@ func FilterDirectRoutes(routes []string) []string {
 }
 
 func FindInterfaceRoutes(ctx context.Context, iface string) ([]string, error) {
-	log.Default().Info("Finding routes for interface:", iface)
+	log.GetLogger(ctx).Info("Finding routes for interface:", iface)
 	output, err := ExecIPCommand(ctx, "route", "show", "dev", iface)
 	if err != nil {
 		return nil, err
@@ -348,20 +354,23 @@ func FindInterfaceRoutes(ctx context.Context, iface string) ([]string, error) {
 		ip := strings.TrimSpace(parts[0])
 		routes = append(routes, ip)
 	}
-	log.Default().Info("Found routes for interface", iface, ":", routes)
+	log.GetLogger(ctx).Info("Found routes for interface", iface, ":", routes)
 	return routes, nil
 }
 
-func CheckSecondaryLanIp(ctx context.Context, interfaceName, primaryIP string, index int) (bool, error) {
-	secondaryIP := SecondaryIPFromPrimaryIP(primaryIP, index)
+func CheckSecondaryLanIp(ctx context.Context, interfaceName, primaryIP string, index byte) (bool, error) {
+	secondaryIP, err := SecondaryIPFromPrimaryIP(ctx, primaryIP, index)
+	if err != nil {
+		return false, fmt.Errorf("failed to get secondary IP from primary IP: %w", err)
+	}
 	parsedSecondaryIP := net.ParseIP(secondaryIP)
 	if parsedSecondaryIP == nil {
-		return false, fmt.Errorf("invalid secondary IP format: %s", secondaryIP)
+		return false, fmt.Errorf("invalid secondary IP format: %q", secondaryIP)
 	}
 	if parsedSecondaryIP.To4() == nil {
 		return false, fmt.Errorf("secondary IP is not an IPv4 address: %s", secondaryIP)
 	}
-	log.Default().Info("Checking if secondary LAN IP is assigned to interface:", interfaceName, "secondary IP:", secondaryIP)
+	log.GetLogger(ctx).Info("Checking if secondary LAN IP is assigned to interface:", interfaceName, "secondary IP:", secondaryIP)
 	iface, err := net.InterfaceByName(interfaceName)
 	if err != nil {
 		return false, fmt.Errorf("failed to find interface %s: %w", interfaceName, err)
@@ -374,29 +383,32 @@ func CheckSecondaryLanIp(ctx context.Context, interfaceName, primaryIP string, i
 		return false, fmt.Errorf("failed to get addresses for interface %s: %w", interfaceName, err)
 	}
 	for _, addr := range addrs {
-		log.Default().Info("Checking address for interface", interfaceName, ":", addr.String())
+		log.GetLogger(ctx).Info("Checking address for interface", interfaceName, ":", addr.String())
 		ipNet, ok := addr.(*net.IPNet)
 		if !ok {
-			log.Default().Debugf("Skipping non-IP address for interface", interfaceName, ":", addr)
+			log.GetLogger(ctx).Debugf("Skipping non-IP address for interface", interfaceName, ":", addr)
 			continue
 		}
 		if ipNet.IP.To4() == nil {
-			log.Default().Debugf("Skipping non-IPv4 address for interface", interfaceName, ":", ipNet.IP)
+			log.GetLogger(ctx).Debugf("Skipping non-IPv4 address for interface", interfaceName, ":", ipNet.IP)
 			continue
 		}
 		if ipNet.Contains(parsedSecondaryIP) {
-			log.Default().Info("Found secondary IP", secondaryIP, "assigned to interface", interfaceName)
+			log.GetLogger(ctx).Info("Found secondary IP", secondaryIP, "assigned to interface", interfaceName)
 			return true, nil
 		}
 	}
-	log.Default().Info("No addresses found for interface", interfaceName, "assuming it is not assigned")
+	log.GetLogger(ctx).Info("No addresses found for interface", interfaceName, "assuming it is not assigned")
 	return false, nil
 }
 
-func AssignSecondaryLanIp(ctx context.Context, interfaceName string, primaryIP string, index int) error {
-	secondaryIP := SecondaryIPFromPrimaryIP(primaryIP, index)
-	log.Default().Info("Assigning secondary LAN IP", secondaryIP, "to interface", interfaceName)
-	_, err := ExecIPCommand(ctx, "addr", "add", secondaryIP, "dev", interfaceName)
+func AssignSecondaryLanIp(ctx context.Context, interfaceName string, primaryIP string, index byte) error {
+	secondaryIP, err := SecondaryIPFromPrimaryIP(ctx, primaryIP, index)
+	if err != nil {
+		return fmt.Errorf("failed to get secondary IP from primary IP: %w", err)
+	}
+	log.GetLogger(ctx).Info("Assigning secondary LAN IP", secondaryIP, "to interface", interfaceName)
+	_, err = ExecIPCommand(ctx, "addr", "add", secondaryIP, "dev", interfaceName)
 	return err
 }
 
@@ -409,45 +421,45 @@ func CheckSecondaryLanCidrRoute(ctx context.Context, interfaceName string) (bool
 	return exists, nil
 }
 
-func AssignSecondaryLanCidrRoute(ctx context.Context, interfaceName string, index int) error {
+func AssignSecondaryLanCidrRoute(ctx context.Context, interfaceName string, index byte) error {
 	exists, err := CheckSecondaryLanCidrRoute(ctx, interfaceName)
 	if err != nil {
 		return fmt.Errorf("failed to check secondary LAN CIDR route: %w", err)
 	}
 	if exists {
-		log.Default().Info("Secondary LAN CIDR route already exists for interface", interfaceName, ":", SecondaryLanCidr)
+		log.GetLogger(ctx).Info("Secondary LAN CIDR route already exists for interface", interfaceName, ":", SecondaryLanCidr)
 		return nil
 	}
-	log.Default().Info("Adding secondary LAN CIDR route", SecondaryLanCidr, "to interface", interfaceName)
+	log.GetLogger(ctx).Info("Adding secondary LAN CIDR route", SecondaryLanCidr, "to interface", interfaceName)
 	return AddInterfaceRoute(ctx, interfaceName, SecondaryLanCidr)
 }
 
 func AddInterfaceRoute(ctx context.Context, iface, cidr string) error {
-	log.Default().Info("Adding route", cidr, "to interface", iface)
+	log.GetLogger(ctx).Info("Adding route", cidr, "to interface", iface)
 	_, err := ExecIPCommand(ctx, "route", "add", cidr, "dev", iface)
 	return err
 }
 
 func RemoveInterfaceRoute(ctx context.Context, iface, cidr string) error {
-	log.Default().Info("Removing route", cidr, "to interface", iface)
+	log.GetLogger(ctx).Info("Removing route", cidr, "to interface", iface)
 	_, err := ExecIPCommand(ctx, "route", "del", cidr, "dev", iface)
 	return err
 }
 
 func SetInterfaceDown(ctx context.Context, interfaceName string) error {
-	log.Default().Info("Seetting secondary network interface to down")
+	log.GetLogger(ctx).Info("Seetting secondary network interface to down")
 	_, err := ExecIPCommand(ctx, "link", "set", interfaceName, "down")
 	return err
 }
 
 func SetInterfaceUp(ctx context.Context, interfaceName string) error {
-	log.Default().Info("Seetting secondary network interface to up")
+	log.GetLogger(ctx).Info("Seetting secondary network interface to up")
 	_, err := ExecIPCommand(ctx, "link", "set", interfaceName, "up")
 	return err
 }
 
 func ExecIPCommand(ctx context.Context, args ...string) ([]byte, error) {
-	log.Default().Info("Executing IP command: ip", args)
+	log.GetLogger(ctx).Info("Executing IP command: ip", args)
 	cmd := exec.CommandContext(ctx,
 		"ip",
 		args...,
@@ -455,11 +467,19 @@ func ExecIPCommand(ctx context.Context, args ...string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
-func SecondaryIPFromPrimaryIP(primaryIP string, index int) string {
-	ip, _ := CIDRForIndex(primaryIP, index)
-	return ip
-	// secondaryIP := fmt.Sprintf("%s%s", , strings.TrimPrefix(primaryIP, PrimaryLanIpPrefix))
-	// return secondaryIP
+func SecondaryIPFromPrimaryIP(ctx context.Context, primaryIP string, index byte) (string, error) {
+	primaryCidr := config.GetConfig(ctx).Lan.CIDR
+	idx := strings.Index(primaryCidr, "/")
+	if idx < 0 {
+		return "", fmt.Errorf("invalid CIDR format: %s", primaryCidr)
+	}
+	suffix := primaryCidr[idx:]
+	primaryIP += suffix
+	cidr, err := CIDRForIndex(primaryIP, index)
+	if err != nil {
+		return "", fmt.Errorf("failed to get CIDR for primary IP %s and index %d: %w", primaryIP, index, err)
+	}
+	return strings.TrimSuffix(cidr, suffix), nil
 }
 
 func StringSet(s []string) map[string]struct{} {
@@ -475,6 +495,7 @@ func CIDRToPrefix(cidr string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid CIDR format: %w", err)
 	}
+	ip = ip.To4()
 	bits, _ := ipNet.Mask.Size()
 	switch bits {
 	case 8, 16, 24:
@@ -494,72 +515,32 @@ func CIDRToPrefix(cidr string) (string, error) {
 	}
 }
 
-func CIDRSize(cidr string) (int, error) {
-	_, ipNet, err := net.ParseCIDR(cidr)
+func IPForIndex(primary string, idx byte) (net.IP, *net.IPNet, error) {
+	fmt.Println("IPForIndex called with primary:", primary, "and index:", idx)
+	primaryCidr, primaryNet, err := net.ParseCIDR(primary)
 	if err != nil {
-		return -1, fmt.Errorf("invalid CIDR format: %w", err)
+		return nil, nil, fmt.Errorf("invalid primary CIDR format: %w", err)
 	}
-	bits, _ := ipNet.Mask.Size()
-	return bits, nil
+	primaryCidr = primaryCidr.To4()
+	size, _ := primaryNet.Mask.Size()
+	ipByte := size/8 - 1
+	lastSpecified := primaryCidr[ipByte]
+	if ipByte == 0 {
+		idx++ // on /8 we can't use 0 as the start byte
+	}
+	if idx >= lastSpecified {
+		primaryCidr[ipByte] += idx
+	} else {
+		primaryCidr[ipByte] = idx
+	}
+	return primaryCidr, primaryNet, nil
 }
 
-func PartialIPString(ip string, size int) (string, error) {
-	if size == 0 {
-		return "", nil
-	}
-	if size < 1 || size > 4 {
-		return "", fmt.Errorf("size must be between 1 and 4")
-	}
-	parts := strings.Split(ip, ".")
-	if len(parts) != 4 {
-		return "", fmt.Errorf("invalid IP format: %s", ip)
-	}
-	return strings.Join(parts[:size], "."), nil
-}
-
-func CIDRLastSpecified(cidr string) (int, error) {
-	size, err := CIDRSize(cidr)
+func CIDRForIndex(primary string, idx byte) (string, error) {
+	primaryIP, primaryNet, err := IPForIndex(primary, idx)
 	if err != nil {
-		return -1, fmt.Errorf("failed to get CIDR size: %w", err)
+		return "", fmt.Errorf("failed to get IP for index %d: %w", idx, err)
 	}
-	parts := strings.Split(cidr, ".")
-	if len(parts) != 4 {
-		return -1, fmt.Errorf("invalid CIDR format: %s", cidr)
-	}
-	idx := size/8 - 1
-	return strconv.Atoi(parts[idx])
-}
-
-func CIDRForIndex(primary string, idx int) (string, error) {
-	size, err := CIDRSize(primary)
-	if err != nil {
-		return "", fmt.Errorf("failed to get CIDR size: %w", err)
-	}
-	count := size/8 - 1
-	primaryIP, err := PartialIPString(primary, count)
-	if err != nil {
-		return "", fmt.Errorf("failed to get partial primary IP string: %w", err)
-	}
-	lastPrimary, err := CIDRLastSpecified(primary)
-	if err != nil {
-		return "", fmt.Errorf("failed to get last specified CIDR: %w", err)
-	}
-	fmt.Println("Last primary:", lastPrimary, "Index:", idx, "Size:", size, "Count:", count)
-	if size == 8 {
-		idx++
-	}
-	if idx >= lastPrimary {
-		idx = lastPrimary + idx
-	}
-	if len(primaryIP) > 0 {
-		primaryIP += "."
-	}
-	cidr := fmt.Sprintf("%s%d", primaryIP, idx)
-	count++
-	for count < 4 {
-		cidr += ".0"
-		count++
-	}
-	cidr += fmt.Sprintf("/%d", size)
-	return cidr, nil
+	size, _ := primaryNet.Mask.Size()
+	return fmt.Sprintf("%s/%d", primaryIP.String(), size), nil
 }

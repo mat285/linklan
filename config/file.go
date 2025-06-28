@@ -17,9 +17,5 @@ func ReadFromFile(ctx context.Context, filePath string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = config.Resolve(ctx) // Resolve the configuration, if necessary
-	if err != nil {
-		return nil, err
-	}
 	return &config, nil
 }

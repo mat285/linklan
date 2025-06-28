@@ -15,27 +15,30 @@ import (
 func run() error {
 	ctx := context.Background()
 	cfg := config.Config{}
-	configPaths := []string{}
+	configPath := "/etc/linklandaemon/config.yml"
 	cmd := &cobra.Command{
 		Use:           "run-api",
 		Short:         "Run api server",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if len(configPaths) > 0 && configPaths[0] != "" {
-				configPath := configPaths[0]
+			if configPath != "" {
 				fromFile, err := config.ReadFromFile(ctx, configPath)
 				if err != nil {
-					os.Stderr.WriteString("Error loading config: " + err.Error() + "\n")
-					os.Exit(1)
+					if !os.IsNotExist(err) {
+						os.Stderr.WriteString("Error loading config: " + err.Error() + "\n")
+						os.Exit(1)
+					}
+					fromFile = &config.Config{}
 				}
 				cfg = *fromFile
 			}
-			if err := cfg.Resolve(ctx); err != nil {
+			ctx, err := cfg.Resolve(ctx)
+			if err != nil {
 				return err
 			}
 
-			log.Default().Info("Using configuration:", cfg.String())
+			log.GetLogger(ctx).Info("Using configuration:", cfg.String())
 
 			ctx = config.WithConfig(ctx, cfg)
 
@@ -47,11 +50,11 @@ func run() error {
 		},
 	}
 
-	cmd.PersistentFlags().StringSliceVarP(
-		&configPaths,
+	cmd.PersistentFlags().StringVarP(
+		&configPath,
 		"config-path",
 		"c",
-		configPaths,
+		configPath,
 		"Path to a file where '.yml' configuration is stored; can be specified multiple times, last provided has highest precedence when merging",
 	)
 

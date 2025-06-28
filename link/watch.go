@@ -87,7 +87,7 @@ func (dw *DeviceWatcher) watchDeviceChanges(ctx context.Context, watcher *fsnoti
 	if watcher == nil {
 		return fmt.Errorf("device watcher is not initialized")
 	}
-	log.Default().Info("Starting device watcher for network interfaces...")
+	log.GetLogger(ctx).Info("Starting device watcher for network interfaces...")
 	for {
 		select {
 		case <-ctx.Done():
@@ -97,7 +97,7 @@ func (dw *DeviceWatcher) watchDeviceChanges(ctx context.Context, watcher *fsnoti
 
 		err := dw.RefreshInterfaces(ctx)
 		if err != nil {
-			log.Default().Errorf("Error refreshing interfaces: %v", err)
+			log.GetLogger(ctx).Errorf("Error refreshing interfaces: %v", err)
 		}
 
 		select {
@@ -122,9 +122,9 @@ func (dw *DeviceWatcher) RefreshInterfaces(ctx context.Context) error {
 	for _, iface := range ifaces {
 		currentIfaces[iface.Name] = iface
 		if _, exists := dw.ifaces[iface.Name]; !exists {
-			log.Default().Info("Adding device:", iface.Name)
+			log.GetLogger(ctx).Info("Adding device:", iface.Name)
 			if err := dw.notify(ctx, iface, ModeCreate); err != nil {
-				log.Default().Error("Error adding device:", iface.Name, err)
+				log.GetLogger(ctx).Error("Error adding device:", iface.Name, err)
 				continue
 			}
 		}
@@ -132,9 +132,9 @@ func (dw *DeviceWatcher) RefreshInterfaces(ctx context.Context) error {
 
 	for name := range dw.ifaces {
 		if iface, exists := currentIfaces[name]; !exists {
-			log.Default().Info("Removing device:", name)
+			log.GetLogger(ctx).Info("Removing device:", name)
 			if err := dw.notify(ctx, iface, ModeRemove); err != nil {
-				log.Default().Error("Error removing device:", name, err)
+				log.GetLogger(ctx).Error("Error removing device:", name, err)
 				// currentIfaces[name] = iface // Keep it in currentIfaces to avoid nil dereference
 				continue
 			}

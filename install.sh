@@ -4,7 +4,8 @@ set -e
 
 VERSION=$1
 if [ -z "$VERSION" ]; then
-    VERSION="v0.2.1"
+    VERSION=$(curl -sL https://api.github.com/repos/mat285/linklan/releases/latest | jq -r .name)
+    echo "No version specified, using latest release: ${VERSION}"
 fi
 
 which kubectl >/dev/null 2>&1 || {
@@ -45,6 +46,9 @@ curl --fail-with-body -Lo linklandaemon.service https://github.com/mat285/linkla
 sudo mv linklandaemon.service /etc/systemd/system/linklandaemon.service
 sudo chmod 644 /etc/systemd/system/linklandaemon.service
 sudo chown root:root /etc/systemd/system/linklandaemon.service
+
+sudo mkdir -p /etc/linklandaemon
+sudo chown root:root /etc/linklandaemon
 
 sudo systemctl daemon-reload
 sudo systemctl enable linklandaemon.service

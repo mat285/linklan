@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+
+	"github.com/mat285/linklan/log"
 )
 
 const (
@@ -17,6 +19,8 @@ type Config struct {
 	Lan        Lan     `yaml:"lan,omitempty" json:"lan,omitempty"`
 	Interfaces []IFace `yaml:"interfaces,omitempty" json:"interfaces,omitempty"`
 	Routing    Routing `yaml:"routing,omitempty" json:"routing,omitempty"`
+
+	Logger log.Config `yaml:"logger,omitempty" json:"logger,omitempty"`
 }
 
 type Lan struct {
@@ -92,63 +96,63 @@ func (c *Config) SetDefaults() {
 	}
 }
 
-func (c *Config) Resolve(ctx context.Context) error {
+func (c *Config) Resolve(ctx context.Context) (context.Context, error) {
 	c.SetDefaults()
-
+	ctx = log.WithLogger(ctx, log.New(c.Logger))
 	if _, err := ParseCidr(c.Lan.CIDR); err != nil {
-		return fmt.Errorf("invalid primary CIDR [%q]: %w", c.Lan.CIDR, err)
+		return nil, fmt.Errorf("invalid primary CIDR [%q]: %w", c.Lan.CIDR, err)
 	}
 
 	for i, cidr := range c.Lan.SecondaryCIDRs {
 		if _, err := ParseCidr(cidr); err != nil {
-			return fmt.Errorf("invalid secondary CIDR  index %d [%q]: %w", i, cidr, err)
+			return nil, fmt.Errorf("invalid secondary CIDR  index %d [%q]: %w", i, cidr, err)
 		}
 	}
 
 	for i, iface := range c.Interfaces {
 		if iface.Match.IsZero() && iface.IFaceIndentifier.IsZero() {
-			return fmt.Errorf("interface %d must have either match or iface identifier set", i)
+			return nil, fmt.Errorf("interface %d must have either match or iface identifier set", i)
 		}
 		if !iface.Match.IsZero() && !iface.IFaceIndentifier.IsZero() {
-			return fmt.Errorf("interface %d cannot have both match and iface identifier set", i)
+			return nil, fmt.Errorf("interface %d cannot have both match and iface identifier set", i)
 		}
 		if !iface.Match.IsZero() {
 			if iface.Match.Name != "" {
 				_, err := regexp.Compile(iface.Match.Name)
 				if err != nil {
-					return fmt.Errorf("invalid regex for interface %d [%q]: %w", i, iface.Match.Name, err)
+					return nil, fmt.Errorf("invalid regex for interface %d [%q]: %w", i, iface.Match.Name, err)
 				}
 			}
 			if iface.Match.Mac != "" {
 				_, err := regexp.Compile(iface.Match.Mac)
 				if err != nil {
-					return fmt.Errorf("invalid regex for MAC address in interface %d [%q]: %w", i, iface.Match.Mac, err)
+					return nil, fmt.Errorf("invalid regex for MAC address in interface %d [%q]: %w", i, iface.Match.Mac, err)
 				}
 			}
 		}
 		if iface.IP != "" {
 			valid := net.ParseIP(iface.IP)
 			if valid == nil {
-				return fmt.Errorf("invalid IP for interface %d [%q]", i, iface.IP)
+				return nil, fmt.Errorf("invalid IP for interface %d [%q]", i, iface.IP)
 			}
 		}
 	}
 
 	for i, route := range c.Routing.Routes {
 		if route.Destination == "" {
-			return fmt.Errorf("route %d must have a destination", i)
+			return nil, fmt.Errorf("route %d must have a destination", i)
 		}
 		if route.Iface == "" {
-			return fmt.Errorf("route %d must have an interface", i)
+			return nil, fmt.Errorf("route %d must have an interface", i)
 		}
 		if _, err := ParseCidr(route.Destination); err != nil {
-			return fmt.Errorf("invalid route destination %d [%q]: %w", i, route.Destination, err)
+			return nil, fmt.Errorf("invalid route destination %d [%q]: %w", i, route.Destination, err)
 		}
 	}
 	if c.Routing.Bonding.Enabled {
-		return fmt.Errorf("bonding is not supported yet")
+		return nil, fmt.Errorf("bonding is not supported yet")
 	}
-	return nil
+	return ctx, nil
 }
 
 func ParseCidr(cidr string) (string, error) {
