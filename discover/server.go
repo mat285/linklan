@@ -444,6 +444,7 @@ func (s *Server) runUDPListener(ctx context.Context, iface string, listener *net
 			return err
 		}
 		//handle packet
+		fmt.Println("received UDP packet on interface", iface, "from", addr, string(buffer[:n]))
 		err = s.handleUDPPacket(ctx, iface, buffer[:n], addr)
 		if err != nil {
 			log.GetLogger(ctx).Infof("Error handling UDP packet from %s: %v", addr, err)
