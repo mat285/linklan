@@ -9,16 +9,16 @@ import (
 
 var (
 	machines = []string{
-		// "node0",
-		// "node1",
-		// "node2",
-		// "node3",
-		// "node4",
-		// "node5",
-		// "node6",
-		// "node7",
-		// "worker0",
-		// "worker2",
+		"node0",
+		"node1",
+		"node2",
+		"node3",
+		"node4",
+		"node5",
+		"node6",
+		"node7",
+		"worker0",
+		"worker2",
 		"zstation",
 	}
 )
@@ -26,12 +26,16 @@ var (
 func main() {
 	wg := &sync.WaitGroup{}
 	lock := &sync.Mutex{}
-	version := "v0.2.1"
+	version := ""
 	if os.Getenv("VERSION") != "" {
 		version = os.Getenv("VERSION")
 	}
 	if len(os.Args) > 1 {
 		version = os.Args[1]
+	}
+	if version == "" {
+		fmt.Println("No version specified. Use VERSION environment variable or pass as argument.")
+		os.Exit(1)
 	}
 	fmt.Printf("Updating machines with version: %s\n", version)
 	for _, machine := range machines {

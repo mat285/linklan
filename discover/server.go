@@ -220,12 +220,12 @@ func (s *Server) tryPingPeer(ctx context.Context, ip net.IP, port int) error {
 
 func (s *Server) tryReconnect(ctx context.Context, ip net.IP) error {
 	log.GetLogger(ctx).Info("Attempting to reconnect to peer with IP ID", ip)
-	maxAttempts := 3
+	maxAttempts := 1
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(time.Duration(mrand.Intn(500))*time.Millisecond + time.Duration(attempt*100)*time.Millisecond):
+		case <-time.After(time.Duration(mrand.Intn(500))*time.Millisecond + time.Duration(1000)*time.Millisecond):
 		}
 
 		s.lock.Lock()
@@ -254,13 +254,16 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	ip := addressToIP(conn.RemoteAddr().String())
 	log.GetLogger(ctx).Debugf("Handling connection from %s", ip)
-	defer func() { go s.tryReconnect(ctx, ip) }() // Attempt to reconnect if the connection is closed unexpectedly
-	s.addNewConn(ctx, conn)
+	if !s.addNewConn(ctx, conn) {
+		log.GetLogger(ctx).Infof("Connection from %s already exists, closing new connection", ip)
+		return
+	}
 	defer s.cleanupConn(ctx, conn)
+	defer func() { go s.tryReconnect(ctx, ip) }() // Attempt to reconnect if the connection is closed unexpectedly
 	s.handleConnRW(ctx, conn)
 }
 
-func (s *Server) addNewConn(ctx context.Context, conn net.Conn) {
+func (s *Server) addNewConn(ctx context.Context, conn net.Conn) bool {
 	ip := addressToIP(conn.RemoteAddr().String())
 
 	s.peersLock.Lock()
@@ -269,12 +272,13 @@ func (s *Server) addNewConn(ctx context.Context, conn net.Conn) {
 	defer s.knownPeersLock.Unlock()
 	s.knownPeers[ip.String()] = struct{}{}
 
-	if curr, exists := s.peers[[4]byte(ip)]; exists {
+	if _, exists := s.peers[[4]byte(ip)]; exists {
 		log.GetLogger(ctx).Infof("Connection from %s already exists, closing older connection", ip)
-		curr.Close()
+		return false
 	}
 	log.GetLogger(ctx).Infof("Adding new peer connection from %s", ip)
 	s.peers[[4]byte(ip)] = conn
+	return true
 }
 
 func (s *Server) cleanupConn(ctx context.Context, conn net.Conn) {
