@@ -366,7 +366,10 @@ func (s *Server) listenUDPIface(ctx context.Context, iface string) error {
 		return fmt.Errorf("failed to get interface %s: %w", iface, err)
 	}
 	if ifn.Flags&net.FlagUp == 0 {
-		return fmt.Errorf("interface %s is down", iface)
+		err = link.SetInterfaceUp(ctx, iface)
+		if err != nil {
+			return err
+		}
 	}
 	addrs, err := ifn.Addrs()
 	if err != nil {
