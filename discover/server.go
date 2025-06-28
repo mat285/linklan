@@ -375,8 +375,9 @@ func (s *Server) listenUDPIface(ctx context.Context, iface string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get addresses for interface %s: %w", iface, err)
 	}
-	lanIP := net.IP{}.To4()
+	var lanIP net.IP
 	for _, addr := range addrs {
+		fmt.Println("checking address", addr.String(), "for interface", iface)
 		ip := net.ParseIP(strings.Split(addr.String(), "/")[0])
 		if ip == nil || ip.To4() == nil {
 			continue
@@ -384,6 +385,10 @@ func (s *Server) listenUDPIface(ctx context.Context, iface string) error {
 		lanIP = ip.To4()
 		log.GetLogger(ctx).Infof("Found IP %s for interface %s", lanIP, iface)
 		break
+	}
+
+	if lanIP == nil {
+		return fmt.Errorf("no valid IPv4 address found for interface %s", iface)
 	}
 
 	addr := net.JoinHostPort(lanIP.String(), fmt.Sprintf("%d", s.Port))
