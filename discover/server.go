@@ -415,14 +415,13 @@ func (s *Server) runUDPListener(ctx context.Context, iface string, listener *net
 		return fmt.Errorf("invalid IPv4 address for UDP listener on interface %s", iface)
 	}
 	log.GetLogger(ctx).Infof("Listening on UDP %s for interface %s", listener.LocalAddr().String(), iface)
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		go func() {
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			fmt.Println("broadcasting UDP packet on interface", iface)
 			err := s.broadcastUDP(ctx, iface, ip)
 			if err != nil {
@@ -430,14 +429,28 @@ func (s *Server) runUDPListener(ctx context.Context, iface string, listener *net
 			} else {
 				log.GetLogger(ctx).Debugf("Broadcasted UDP packet on interface %s", iface)
 			}
-		}()
+			select {
+			case <-ctx.Done():
+				log.GetLogger(ctx).Infof("Stopping UDP broadcast on interface %s", iface)
+				return
+			case <-time.After(5 * time.Second):
+				log.GetLogger(ctx).Debugf("Waiting for next UDP broadcast on interface %s", iface)
+			}
+		}
+	}()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 
 		fmt.Println("reading from UDP listener on interface", iface)
-		listener.SetReadDeadline(time.Now().Add(5 * time.Second))
+		// listener.SetReadDeadline(time.Now().Add(5 * time.Second))
 		n, addr, err := listener.ReadFromUDP(buffer)
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
-				log.GetLogger(ctx).Debugf("UDP read deadline exceeded on interface %s, continuing to listen", iface)
+				log.GetLogger(ctx).Infof("UDP read deadline exceeded on interface %s, continuing to listen", iface)
 				continue
 			}
 			log.GetLogger(ctx).Infof("Error reading from UDP: %v", err)
