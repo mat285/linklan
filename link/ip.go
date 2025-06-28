@@ -173,29 +173,58 @@ func FindSecondaryNetworkIP(ctx context.Context, iface string, index int) (strin
 
 func FindInterfaceIP(ctx context.Context, prefix string, iface string) (string, error) {
 	log.GetLogger(ctx).Info("Finding IP for prefix", prefix, "with interface:", iface)
-	args := []string{
-		"addr",
-		"show",
-	}
-	if len(iface) > 0 {
-		args = append(args, iface)
-	}
-	output, err := ExecIPCommand(ctx, args...)
+
+	ifaces, err := net.Interfaces()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get network interfaces: %w", err)
 	}
-	str := string(output)
-	idx := strings.Index(str, prefix)
-	if idx < 0 {
-		return "", fmt.Errorf("no network IP found")
+
+	for _, i := range ifaces {
+		addrs, err := i.Addrs()
+		if err != nil {
+			log.GetLogger(ctx).Info("Error getting addresses for interface:", i.Name, err)
+			continue
+		}
+		for _, addr := range addrs {
+			if strings.HasPrefix(addr.String(), prefix) {
+				log.GetLogger(ctx).Info("Found IP for prefix", prefix, "on interface:", i.Name)
+				return strings.TrimSpace(strings.Split(addr.String(), "/")[0]), nil
+			}
+		}
 	}
-	str = str[idx:]
-	idx = strings.Index(str, "/")
-	if idx < 0 {
-		return "", fmt.Errorf("no network IP found")
-	}
-	str = str[:idx]
-	return strings.TrimSpace(str), nil
+	return "", fmt.Errorf("no IP found for prefix %s on interface %s", prefix, iface)
+
+	//	args := []string{
+	//		"addr",
+	//		"show",
+	//	}
+	//
+	//	if len(iface) > 0 {
+	//		args = append(args, iface)
+	//	}
+	//
+	// output, err := ExecIPCommand(ctx, args...)
+	//
+	//	if err != nil {
+	//		return "", err
+	//	}
+	//
+	// str := string(output)
+	// idx := strings.Index(str, prefix)
+	//
+	//	if idx < 0 {
+	//		return "", fmt.Errorf("no network IP found")
+	//	}
+	//
+	// str = str[idx:]
+	// idx = strings.Index(str, "/")
+	//
+	//	if idx < 0 {
+	//		return "", fmt.Errorf("no network IP found")
+	//	}
+	//
+	// str = str[:idx]
+	// return strings.TrimSpace(str), nil
 }
 
 func FindSecondaryNetworkInterface(ctx context.Context) ([]string, error) {

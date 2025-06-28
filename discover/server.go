@@ -8,6 +8,7 @@ import (
 	mrand "math/rand"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,16 +23,26 @@ var (
 	BeginBytes  = []byte{'B', 'E', 'G', 'I', 'N', '\n'}
 	PingBytes   = []byte{'P', 'I', 'N', 'G', '\n'}
 
+	UDPIPPayloadPrefix = []byte{'*', '*', '*', 'I', 'P', '*', '*', '*'}
+	IPAddrSize         = 4
+
 	DialTimeout = 10 * time.Millisecond
 
 	SpeedTestDataSize   int64 = 16 * 1024 * 1024
 	SpeedTestInterval         = 60 * time.Second
 	SpeedTestBufferSize       = 1024 * 1024
 
-	PingInterval = 1 * time.Second
+	PingInterval = 5 * time.Second
 
 	MetricName = "link_speed"
 )
+
+type udpPing struct {
+	IP      net.IP
+	RouteIP net.IP
+	Iface   string
+	Time    time.Time
+}
 
 type Server struct {
 	Port int
@@ -46,6 +57,9 @@ type Server struct {
 
 	knownPeersLock sync.Mutex
 	knownPeers     map[string]struct{} // Track known peers to avoid duplicates
+
+	udpPings     map[[4]byte]udpPing // Track recent UDP pings to avoid duplicates
+	udpPingsLock sync.Mutex          // Lock for udpPings
 }
 
 func NewServer(ip string, port int) *Server {
@@ -54,8 +68,10 @@ func NewServer(ip string, port int) *Server {
 		Port:           port,
 		peers:          make(map[[4]byte]net.Conn),
 		knownPeers:     make(map[string]struct{}),
+		udpPings:       make(map[[4]byte]udpPing),
 		peersLock:      sync.Mutex{},
 		knownPeersLock: sync.Mutex{},
+		udpPingsLock:   sync.Mutex{},
 		lock:           sync.Mutex{},
 		cancel:         nil,
 		done:           nil,
@@ -80,7 +96,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.lock.Unlock()
 
 	go s.SearchForPeers(ctx)
-	err := s.Listen(ctx)
+	err := s.listen(ctx)
 	cancel()
 	close(done)
 	log.GetLogger(ctx).Info("Server stopped")
@@ -171,17 +187,106 @@ func (s *Server) searchWholeLan(ctx context.Context, lan byte) error {
 	return nil
 }
 
-func (s *Server) Listen(ctx context.Context) error {
-	listener, err := net.Listen("tcp", net.JoinHostPort(s.IP, fmt.Sprintf("%d", s.Port)))
+func (s *Server) listen(ctx context.Context) error {
+	listenCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	tcpListener, err := s.listenNetwork(listenCtx, "tcp4")
 	if err != nil {
+		log.GetLogger(ctx).Errorf("Failed to listen on tcp4: %v", err)
 		return err
 	}
+	defer tcpListener.Close()
+
+	var wg sync.WaitGroup
+	var tcpErr, udpErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer tcpListener.Close()
+		tcpErr = s.runListener(listenCtx, "tcp4", tcpListener)
+		if tcpErr != nil {
+			log.GetLogger(ctx).Errorf("Error running tcp4 listener: %v", tcpErr)
+		}
+		cancel()
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		udpErr = s.listenAllUDP(listenCtx)
+		if udpErr != nil {
+			log.GetLogger(ctx).Errorf("Error running UDP listener: %v", udpErr)
+		}
+		cancel()
+	}()
+
+	wg.Wait() // Wait for all listeners to finish
+	return errors.Join(tcpErr, udpErr)
+	// networks := []string{"udp4", "tcp4"}
+	// listeners := make([]net.Listener, 0, len(networks))
+
+	// errChan := make(chan error, len(networks))
+	// log.GetLogger(ctx).Info("Starting server listeners")
+	// for _, network := range networks {
+	// 	listener, err := s.listenNetwork(ctx, network)
+	// 	if err != nil {
+	// 		log.GetLogger(ctx).Errorf("Failed to listen on %s: %v", network, err)
+	// 		cancel() // Cancel the context to stop all listeners
+	// 		return err
+	// 	}
+	// 	defer listener.Close()
+	// 	listeners = append(listeners, listener)
+	// 	go func(ctx context.Context, network string, listener net.Listener) {
+	// 		err := s.runListener(ctx, network, listener)
+	// 		log.GetLogger(ctx).Errorf("Error listening on %s: %v", network, err)
+	// 		errChan <- err
+	// 	}(listenCtx, network, listener)
+	// }
+	// finished := 0
+	// errs := make([]error, 0, len(networks)+1)
+	// select {
+	// case <-ctx.Done():
+	// 	log.GetLogger(ctx).Info("Server context done, stopping listeners")
+	// 	errs = append(errs, ctx.Err())
+	// case err := <-errChan:
+	// 	finished++
+	// 	if err != nil {
+	// 		errs = append(errs, err)
+	// 	}
+	// }
+	// cancel() // Cancel the context to stop all listeners
+	// for _, listener := range listeners {
+	// 	if err := listener.Close(); err != nil {
+	// 		log.GetLogger(ctx).Errorf("Error closing listener: %v", err)
+	// 	}
+	// }
+	// for finished < len(networks) {
+	// 	err := <-errChan // Wait for all listeners to finish
+	// 	finished++
+	// 	if err != nil {
+	// 		log.GetLogger(ctx).Errorf("Error in server listener: %v", err)
+	// 		errs = append(errs, err)
+	// 	}
+	// }
+	// if len(errs) > 0 {
+	// 	return fmt.Errorf("server encountered errors: %v", errors.Join(errs...))
+	// }
+	// log.GetLogger(ctx).Info("Server listeners stopped successfully")
+	// return nil
+}
+
+func (s *Server) listenNetwork(ctx context.Context, network string) (net.Listener, error) {
+	return net.Listen(network, net.JoinHostPort(s.IP, fmt.Sprintf("%d", s.Port)))
+}
+
+func (s *Server) runListener(ctx context.Context, network string, listener net.Listener) error {
 	defer listener.Close()
+	log.GetLogger(ctx).Infof("Listening on %s://%s:%d", network, s.IP, s.Port)
 	go func() {
 		<-ctx.Done()
-		log.GetLogger(ctx).Info("Stopping listener")
+		log.GetLogger(ctx).Infof("Stopping %s listener", network)
 		if err := listener.Close(); err != nil {
-			log.GetLogger(ctx).Errorf("Error closing listener: %v", err)
+			log.GetLogger(ctx).Errorf("Error closing %s listener: %v", network, err)
 		}
 	}()
 	for {
@@ -192,10 +297,151 @@ func (s *Server) Listen(ctx context.Context) error {
 		}
 		conn, err := listener.Accept()
 		if err != nil {
-			log.GetLogger(ctx).Info("Error accepting connection:", err)
+			log.GetLogger(ctx).Infof("Error accepting %s connection: %v", network, err)
 		}
-		go s.handleConnection(ctx, conn)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			go s.handleConnection(ctx, conn)
+		}
 	}
+}
+
+func (s *Server) listenAllUDP(ctx context.Context) error {
+	listening := map[string]bool{}
+	lock := &sync.Mutex{}
+	lctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		ifaces, err := link.FindSecondaryNetworkInterface(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to find secondary network interface: %w", err)
+		}
+
+		for _, iface := range ifaces {
+			log.GetLogger(ctx).Infof("Found interface %s for UDP listening", iface)
+			lock.Lock()
+			if listening[iface] {
+				lock.Unlock()
+				log.GetLogger(ctx).Infof("Already listening on interface %s", iface)
+				continue
+			}
+			listening[iface] = true
+			lock.Unlock()
+			go func(iface string) {
+				err := s.listenUDPIface(lctx, iface)
+				if err != nil {
+					log.GetLogger(ctx).Errorf("Error listening on UDP interface %s: %v", iface, err)
+				}
+				lock.Lock()
+				defer lock.Unlock()
+				listening[iface] = false
+			}(iface)
+		}
+
+		select {
+		case <-ctx.Done():
+			log.GetLogger(ctx).Info("Stopping all UDP listeners")
+			cancel() // Cancel the context to stop all listeners
+			return ctx.Err()
+		case <-time.After(10 * time.Second):
+			log.GetLogger(ctx).Info("Checking for new interfaces to listen on")
+			continue
+		}
+	}
+}
+
+func (s *Server) listenUDPIface(ctx context.Context, iface string) error {
+	log.GetLogger(ctx).Infof("Listening on UDP for interface %s", iface)
+	ifn, err := net.InterfaceByName(iface)
+	if err != nil {
+		return fmt.Errorf("failed to get interface %s: %w", iface, err)
+	}
+	if ifn.Flags&net.FlagUp == 0 {
+		return fmt.Errorf("interface %s is down", iface)
+	}
+	addrs, err := ifn.Addrs()
+	if err != nil {
+		return fmt.Errorf("failed to get addresses for interface %s: %w", iface, err)
+	}
+	lanIP := net.IP{}.To4()
+	for _, addr := range addrs {
+		ip := net.ParseIP(strings.Split(addr.String(), "/")[0])
+		if ip == nil || ip.To4() == nil {
+			continue
+		}
+		lanIP = ip.To4()
+		log.GetLogger(ctx).Infof("Found IP %s for interface %s", lanIP, iface)
+		break
+	}
+
+	addr := net.JoinHostPort(lanIP.String(), fmt.Sprintf("%d", s.Port))
+	uaddr, err := net.ResolveUDPAddr("udp4", addr)
+	if err != nil {
+		return fmt.Errorf("failed to resolve UDP address %s: %w", addr, err)
+	}
+	listener, err := net.ListenUDP("udp4", uaddr)
+	if err != nil {
+		return fmt.Errorf("failed to listen on UDP %s: %w", addr, err)
+	}
+	defer listener.Close()
+	log.GetLogger(ctx).Infof("Listening on UDP %s for interface %s", addr, iface)
+	return s.runUDPListener(ctx, iface, listener, nil)
+}
+
+func (s *Server) runUDPListener(ctx context.Context, iface string, listener *net.UDPConn, buffer []byte) error {
+	defer listener.Close()
+	if len(buffer) == 0 {
+		buffer = make([]byte, 1024)
+	}
+	log.GetLogger(ctx).Infof("Listening on UDP %s:%d", s.IP, s.Port)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		n, addr, err := listener.ReadFromUDP(buffer)
+		if err != nil {
+			log.GetLogger(ctx).Infof("Error reading from UDP: %v", err)
+			continue
+		}
+		//handle packet
+		err = s.handleUDPPacket(ctx, iface, buffer[:n], addr)
+		if err != nil {
+			log.GetLogger(ctx).Infof("Error handling UDP packet from %s: %v", addr, err)
+		}
+	}
+}
+
+func (s *Server) handleUDPPacket(ctx context.Context, iface string, packet []byte, addr *net.UDPAddr) error {
+	if len(packet) < len(UDPIPPayloadPrefix) || !strings.HasPrefix(string(packet[:len(UDPIPPayloadPrefix)]), string(UDPIPPayloadPrefix)) {
+		log.GetLogger(ctx).Debugf("Received non-IP packet from %s: %s", addr, packet)
+		return nil
+	}
+	ipBytes := packet[len(UDPIPPayloadPrefix):]
+	if len(ipBytes) != IPAddrSize {
+		return fmt.Errorf("invalid IP address size in UDP packet from %s: expected %d bytes, got %d", addr, IPAddrSize, len(ipBytes))
+	}
+	ip := net.IP(ipBytes)
+	log.GetLogger(ctx).Debugf("Received IP packet from %s: %s", addr, ip)
+
+	s.udpPingsLock.Lock()
+	defer s.udpPingsLock.Unlock()
+	s.udpPings[[4]byte(ip)] = udpPing{
+		IP:      ip,
+		RouteIP: addr.IP,
+		Iface:   iface,
+		Time:    time.Now(),
+	}
+	return nil
 }
 
 func (s *Server) Stop() {

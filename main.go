@@ -1,6 +1,26 @@
 package main
 
+import (
+	"fmt"
+	"net"
+)
+
 func main() {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		fmt.Println("Error getting network interfaces:", err)
+		return
+	}
+
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			fmt.Println("Error getting addresses for interface", iface.Name, ":", err)
+		}
+		for _, addr := range addrs {
+			fmt.Println("Interface:", iface.Name, "Address:", addr.String())
+		}
+	}
 	// ctx := context.Background()
 	// if err := link.EnsureDirectLan(ctx, nil); err != nil {
 	// 	fmt.Fprintln(os.Stderr, "Error setting up direct LAN:", err)

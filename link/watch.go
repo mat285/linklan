@@ -75,11 +75,7 @@ func (dw *DeviceWatcher) Start(ctx context.Context) error {
 	}
 
 	err = dw.watchDeviceChanges(ctx, watcher)
-	dw.lock.Lock()
-	dw.cancel = nil
 	close(dw.done)
-	dw.done = nil
-	dw.lock.Unlock()
 	return err
 }
 
@@ -168,9 +164,9 @@ func (dw *DeviceWatcher) Stop() error {
 	if cancel != nil {
 		cancel()
 	}
-	done := dw.done
-	if done != nil {
-		<-done
-	}
+	// done := dw.done
+	// if done != nil {
+	// 	<-done
+	// }
 	return nil
 }
