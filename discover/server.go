@@ -9,6 +9,7 @@ import (
 	mrand "math/rand"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,8 +37,9 @@ var (
 )
 
 type Server struct {
-	Port int
-	IP   string
+	Port    int
+	LocalIP string
+	IP      string
 
 	lock   sync.Mutex
 	cancel context.CancelFunc
@@ -50,9 +52,10 @@ type Server struct {
 	knownPeers     map[string]struct{} // Track known peers to avoid duplicates
 }
 
-func NewServer(ip string, port int) *Server {
+func NewServer(localIP, listenIP string, port int) *Server {
 	return &Server{
-		IP:             ip,
+		LocalIP:        localIP,
+		IP:             listenIP,
 		Port:           port,
 		peers:          make(map[[4]byte]net.Conn),
 		knownPeers:     make(map[string]struct{}),
@@ -135,13 +138,11 @@ func (s *Server) SearchForPeers(ctx context.Context) error {
 func (s *Server) searchWholeLan(ctx context.Context, lan byte) error {
 	var err error
 	log.GetLogger(ctx).Info("Searching whole LAN with ID", lan)
-	localIP := net.ParseIP(s.IP).To4()
-	cfg := config.GetConfig(ctx)
-	if cfg != nil {
-		localIP, _, err = link.IPForIndex(cfg.Lan.CIDR, lan)
-		if err != nil {
-			return fmt.Errorf("failed to get local IP for LAN ID %d: %w", lan, err)
-		}
+	localIP := net.ParseIP(s.LocalIP).To4()
+	cidrSuffix := "/" + strings.Split(config.GetConfig(ctx).Lan.CIDR, "/")[1]
+	localIP, _, err = link.IPForIndex(localIP.String()+cidrSuffix, lan)
+	if err != nil {
+		return fmt.Errorf("failed to get local IP for LAN ID %d: %w", lan, err)
 	}
 	log.GetLogger(ctx).Infof("Using local IP %s for lan index %d", localIP, lan)
 	localID := localIP[len(localIP)-1]
@@ -322,6 +323,8 @@ func (s *Server) handleConnRW(ctx context.Context, conn *link.Conn) {
 }
 
 func (s *Server) writeConn(ctx context.Context, conn *link.Conn) error {
+	defer conn.Close()
+	log.GetLogger(ctx).Debugf("Starting write loop for connection %s", conn.RemoteAddr().String())
 	lastPing := time.Now()
 	for {
 		if time.Since(lastPing) > PingTimeout {
@@ -355,6 +358,8 @@ func (s *Server) writeConn(ctx context.Context, conn *link.Conn) error {
 }
 
 func (s *Server) readConn(ctx context.Context, conn *link.Conn) error {
+	defer conn.Close()
+	log.GetLogger(ctx).Debugf("Starting read loop for connection %s", conn.RemoteAddr().String())
 	buffer := make([]byte, SpeedTestBufferSize)
 	for {
 		select {

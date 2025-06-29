@@ -61,7 +61,7 @@ func (d *Daemon) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	d.cancel = cancel
-	d.Server = discover.NewServer("0.0.0.0", 11221)
+	d.Server = discover.NewServer(d.LocalIP, "0.0.0.0", 11221)
 	d.lock.Unlock()
 	var wg sync.WaitGroup
 
