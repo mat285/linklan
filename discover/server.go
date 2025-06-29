@@ -8,7 +8,6 @@ import (
 	mrand "math/rand"
 	"net"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -23,8 +22,9 @@ var (
 	BeginBytes  = []byte{'B', 'E', 'G', 'I', 'N', '\n'}
 	PingBytes   = []byte{'P', 'I', 'N', 'G', '\n'}
 
-	UDPIPPayloadPrefix = []byte{'*', '*', '*', 'I', 'P', '*', '*', '*'}
-	IPAddrSize         = 4
+	UDPPayloadPrefix = []byte{'*', '*', '*', 'S', 'L', 'L', '*', '*', '*'}
+	UDPPayloadSuffix = []byte{'*', '*', '*', 'E', 'L', 'L', '*', '*', '*'}
+	IPAddrSize       = 4
 
 	DialTimeout = 10 * time.Millisecond
 
@@ -213,7 +213,7 @@ func (s *Server) listen(ctx context.Context) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		udpErr = s.listenAllUDP(listenCtx)
+		udpErr = s.listenUDP(listenCtx)
 		if udpErr != nil {
 			log.GetLogger(ctx).Errorf("Error running UDP listener: %v", udpErr)
 		}
@@ -222,57 +222,6 @@ func (s *Server) listen(ctx context.Context) error {
 
 	wg.Wait() // Wait for all listeners to finish
 	return errors.Join(tcpErr, udpErr)
-	// networks := []string{"udp4", "tcp4"}
-	// listeners := make([]net.Listener, 0, len(networks))
-
-	// errChan := make(chan error, len(networks))
-	// log.GetLogger(ctx).Info("Starting server listeners")
-	// for _, network := range networks {
-	// 	listener, err := s.listenNetwork(ctx, network)
-	// 	if err != nil {
-	// 		log.GetLogger(ctx).Errorf("Failed to listen on %s: %v", network, err)
-	// 		cancel() // Cancel the context to stop all listeners
-	// 		return err
-	// 	}
-	// 	defer listener.Close()
-	// 	listeners = append(listeners, listener)
-	// 	go func(ctx context.Context, network string, listener net.Listener) {
-	// 		err := s.runListener(ctx, network, listener)
-	// 		log.GetLogger(ctx).Errorf("Error listening on %s: %v", network, err)
-	// 		errChan <- err
-	// 	}(listenCtx, network, listener)
-	// }
-	// finished := 0
-	// errs := make([]error, 0, len(networks)+1)
-	// select {
-	// case <-ctx.Done():
-	// 	log.GetLogger(ctx).Info("Server context done, stopping listeners")
-	// 	errs = append(errs, ctx.Err())
-	// case err := <-errChan:
-	// 	finished++
-	// 	if err != nil {
-	// 		errs = append(errs, err)
-	// 	}
-	// }
-	// cancel() // Cancel the context to stop all listeners
-	// for _, listener := range listeners {
-	// 	if err := listener.Close(); err != nil {
-	// 		log.GetLogger(ctx).Errorf("Error closing listener: %v", err)
-	// 	}
-	// }
-	// for finished < len(networks) {
-	// 	err := <-errChan // Wait for all listeners to finish
-	// 	finished++
-	// 	if err != nil {
-	// 		log.GetLogger(ctx).Errorf("Error in server listener: %v", err)
-	// 		errs = append(errs, err)
-	// 	}
-	// }
-	// if len(errs) > 0 {
-	// 	return fmt.Errorf("server encountered errors: %v", errors.Join(errs...))
-	// }
-	// log.GetLogger(ctx).Info("Server listeners stopped successfully")
-	// return nil
 }
 
 func (s *Server) listenNetwork(ctx context.Context, network string) (net.Listener, error) {
@@ -308,90 +257,8 @@ func (s *Server) runListener(ctx context.Context, network string, listener net.L
 	}
 }
 
-func (s *Server) listenAllUDP(ctx context.Context) error {
-	listening := map[string]bool{}
-	lock := &sync.Mutex{}
-	lctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		ifaces, err := link.FindSecondaryNetworkInterface(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to find secondary network interface: %w", err)
-		}
-
-		for _, iface := range ifaces {
-			log.GetLogger(ctx).Infof("Found interface %s for UDP listening", iface)
-			lock.Lock()
-			if listening[iface] {
-				lock.Unlock()
-				log.GetLogger(ctx).Infof("Already listening on interface %s", iface)
-				continue
-			}
-			listening[iface] = true
-			lock.Unlock()
-			go func(iface string) {
-				err := s.listenUDPIface(lctx, iface)
-				if err != nil {
-					log.GetLogger(ctx).Errorf("Error listening on UDP interface %s: %v", iface, err)
-				}
-				lock.Lock()
-				defer lock.Unlock()
-				listening[iface] = false
-			}(iface)
-		}
-
-		select {
-		case <-ctx.Done():
-			log.GetLogger(ctx).Info("Stopping all UDP listeners")
-			cancel() // Cancel the context to stop all listeners
-			return ctx.Err()
-		case <-time.After(10 * time.Second):
-			log.GetLogger(ctx).Info("Checking for new interfaces to listen on")
-			continue
-		}
-	}
-}
-
-func (s *Server) listenUDPIface(ctx context.Context, iface string) error {
-	fmt.Println("hi")
-	log.GetLogger(ctx).Infof("Listening on UDP for interface %s", iface)
-	ifn, err := net.InterfaceByName(iface)
-	if err != nil {
-		return fmt.Errorf("failed to get interface %s: %w", iface, err)
-	}
-	if ifn.Flags&net.FlagUp == 0 {
-		err = link.SetInterfaceUp(ctx, iface)
-		if err != nil {
-			return err
-		}
-	}
-	addrs, err := ifn.Addrs()
-	if err != nil {
-		return fmt.Errorf("failed to get addresses for interface %s: %w", iface, err)
-	}
-	var lanIP net.IP
-	for _, addr := range addrs {
-		fmt.Println("checking address", addr.String(), "for interface", iface)
-		ip := net.ParseIP(strings.Split(addr.String(), "/")[0])
-		if ip == nil || ip.To4() == nil {
-			continue
-		}
-		lanIP = ip.To4()
-		log.GetLogger(ctx).Infof("Found IP %s for interface %s", lanIP, iface)
-		break
-	}
-
-	if lanIP == nil || len(lanIP) != 4 || (lanIP[0] == 0 && lanIP[1] == 0 && lanIP[2] == 0 && lanIP[3] == 0) {
-		return fmt.Errorf("no valid IPv4 address found for interface %s", iface)
-	}
-
-	addr := net.JoinHostPort(lanIP.String(), fmt.Sprintf("%d", s.Port))
+func (s *Server) listenUDP(ctx context.Context) error {
+	addr := net.JoinHostPort("0.0.0.0", fmt.Sprintf("%d", s.Port))
 	uaddr, err := net.ResolveUDPAddr("udp4", addr)
 	if err != nil {
 		return fmt.Errorf("failed to resolve UDP address %s: %w", addr, err)
@@ -401,20 +268,16 @@ func (s *Server) listenUDPIface(ctx context.Context, iface string) error {
 		return fmt.Errorf("failed to listen on UDP %s: %w", addr, err)
 	}
 	defer listener.Close()
-	log.GetLogger(ctx).Infof("Listening on UDP %s for interface %s", uaddr, iface)
-	return s.runUDPListener(ctx, iface, listener, nil)
+	log.GetLogger(ctx).Infof("Listening on UDP %s", uaddr)
+	return s.runUDPListener(ctx, listener, nil)
 }
 
-func (s *Server) runUDPListener(ctx context.Context, iface string, listener *net.UDPConn, buffer []byte) error {
+func (s *Server) runUDPListener(ctx context.Context, listener *net.UDPConn, buffer []byte) error {
 	defer listener.Close()
 	if len(buffer) == 0 {
 		buffer = make([]byte, 1024)
 	}
-	ip := listener.LocalAddr().(*net.UDPAddr).IP.To4()
-	if ip == nil {
-		return fmt.Errorf("invalid IPv4 address for UDP listener on interface %s", iface)
-	}
-	log.GetLogger(ctx).Infof("Listening on UDP %s for interface %s", listener.LocalAddr().String(), iface)
+	log.GetLogger(ctx).Infof("Listening on UDP %s", listener.LocalAddr().String())
 	go func() {
 		for {
 			select {
@@ -422,19 +285,19 @@ func (s *Server) runUDPListener(ctx context.Context, iface string, listener *net
 				return
 			default:
 			}
-			fmt.Println("broadcasting UDP packet on interface", iface)
-			err := s.broadcastUDP(ctx, iface, ip)
+			fmt.Println("broadcasting UDP packet to all")
+			err := s.broadcastUDP(ctx)
 			if err != nil {
-				log.GetLogger(ctx).Infof("Error broadcasting UDP packet on interface %s: %v", iface, err)
+				log.GetLogger(ctx).Infof("Error broadcasting UDP packet")
 			} else {
-				log.GetLogger(ctx).Debugf("Broadcasted UDP packet on interface %s", iface)
+				log.GetLogger(ctx).Debugf("Broadcasted UDP packet")
 			}
 			select {
 			case <-ctx.Done():
-				log.GetLogger(ctx).Infof("Stopping UDP broadcast on interface %s", iface)
+				log.GetLogger(ctx).Infof("Stopping UDP broadcast")
 				return
 			case <-time.After(5 * time.Second):
-				log.GetLogger(ctx).Debugf("Waiting for next UDP broadcast on interface %s", iface)
+				log.GetLogger(ctx).Debugf("Waiting for next UDP broadcast")
 			}
 		}
 	}()
@@ -445,47 +308,68 @@ func (s *Server) runUDPListener(ctx context.Context, iface string, listener *net
 		default:
 		}
 
-		fmt.Println("reading from UDP listener on interface", iface)
 		// listener.SetReadDeadline(time.Now().Add(5 * time.Second))
 		n, addr, err := listener.ReadFromUDP(buffer)
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
-				log.GetLogger(ctx).Infof("UDP read deadline exceeded on interface %s, continuing to listen", iface)
+				log.GetLogger(ctx).Infof("UDP read deadline exceeded continuing to listen")
 				continue
 			}
 			log.GetLogger(ctx).Infof("Error reading from UDP: %v", err)
 			return err
 		}
+		if addr.IP.To4().String() == s.IP {
+			log.GetLogger(ctx).Debugf("Ignoring UDP packet from self %s", addr.IP)
+			continue // Ignore packets from self
+		}
 		//handle packet
-		fmt.Println("received UDP packet on interface", iface, "from", addr, string(buffer[:n]))
-		err = s.handleUDPPacket(ctx, iface, buffer[:n], addr)
+		err = s.handleUDPPacket(ctx, buffer[:n])
 		if err != nil {
 			log.GetLogger(ctx).Infof("Error handling UDP packet from %s: %v", addr, err)
 		}
 	}
 }
 
-func (s *Server) handleUDPPacket(ctx context.Context, iface string, packet []byte, addr *net.UDPAddr) error {
-	log.GetLogger(ctx).Debugf("Received UDP packet from %s on interface %s: %s", addr, iface, string(packet))
-	if len(packet) < len(UDPIPPayloadPrefix) || !strings.HasPrefix(string(packet[:len(UDPIPPayloadPrefix)]), string(UDPIPPayloadPrefix)) {
-		log.GetLogger(ctx).Debugf("Received non-IP packet from %s: %s", addr, packet)
-		return nil
+func (s *Server) handleUDPPacket(ctx context.Context, packet []byte) error {
+	log.GetLogger(ctx).Debugf("Received UDP packet %s", string(packet))
+	payload, err := DecodeUDPPacket(packet)
+	if err != nil {
+		log.GetLogger(ctx).Debugf("Failed to decode UDP packet from %s: %v", "", err)
+		return fmt.Errorf("failed to decode UDP packet from %s: %w", "", err)
 	}
-	ipBytes := packet[len(UDPIPPayloadPrefix):]
-	if len(ipBytes) != IPAddrSize {
-		return fmt.Errorf("invalid IP address size in UDP packet from %s: expected %d bytes, got %d", addr, IPAddrSize, len(ipBytes))
+	if len(payload.PrimaryIP) == 0 {
+		log.GetLogger(ctx).Debugf("Received empty primary IP in UDP packet")
+		return fmt.Errorf("received empty primary IP in UDP packet")
 	}
-	ip := net.IP(ipBytes)
-	log.GetLogger(ctx).Debugf("Received IP packet from %s: %s", addr, ip)
+	primaryIP := net.ParseIP(payload.PrimaryIP)
+	if primaryIP == nil {
+		log.GetLogger(ctx).Debugf("Failed to parse primary IP %s from UDP packet", payload.PrimaryIP)
+		return fmt.Errorf("failed to parse primary IP %s from UDP packet", payload.PrimaryIP)
+	}
+	log.GetLogger(ctx).Debugf("Received IP packet from %s", primaryIP)
 
 	s.udpPingsLock.Lock()
 	defer s.udpPingsLock.Unlock()
-	s.udpPings[[4]byte(ip)] = udpPing{
-		IP:      ip,
-		RouteIP: addr.IP,
-		Iface:   iface,
+	s.udpPings[[4]byte(primaryIP)] = udpPing{
+		IP:      primaryIP,
+		RouteIP: primaryIP, // Assuming RouteIP is the same as PrimaryIP for now
 		Time:    time.Now(),
 	}
+
+	for _, secondaryIP := range payload.SecondaryIPs {
+		sIP := net.ParseIP(secondaryIP).To4()
+		if sIP == nil {
+			log.GetLogger(ctx).Debugf("Failed to parse secondary IP %s from UDP packet", secondaryIP)
+			continue
+		}
+		log.GetLogger(ctx).Debugf("Received secondary IP %s from UDP packet", sIP)
+		s.udpPings[[4]byte(sIP)] = udpPing{
+			IP:      primaryIP,
+			RouteIP: sIP, // Assuming RouteIP is the same as SecondaryIP for now
+			Time:    time.Now(),
+		}
+	}
+	log.GetLogger(ctx).Debugf("Updated UDP pings with primary IP %s and secondary IPs %v from packet: %s", primaryIP, payload.SecondaryIPs, string(packet))
 	return nil
 }
 
@@ -498,22 +382,20 @@ func (s *Server) Stop() {
 	}
 }
 
-func (s *Server) broadcastUDP(ctx context.Context, iface string, ip net.IP) error {
-	laddr, err := net.ResolveUDPAddr("udp4", net.JoinHostPort(ip.String(), fmt.Sprintf("%d", s.Port+1)))
-	if err != nil {
-		return fmt.Errorf("failed to resolve UDP address for broadcast: %w", err)
-	}
-	raddr, err := net.ResolveUDPAddr("udp4", net.JoinHostPort(net.IPv4bcast.String(), fmt.Sprintf("%d", s.Port)))
-	if err != nil {
-		return fmt.Errorf("failed to resolve UDP broadcast address: %w", err)
-	}
-	conn, err := net.DialUDP("udp4", laddr, raddr)
+func (s *Server) broadcastUDP(ctx context.Context) error {
+	conn, err := net.DialUDP("udp4", nil, &net.UDPAddr{
+		IP:   net.IPv4bcast,
+		Port: s.Port,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to dial UDP broadcast: %w", err)
 	}
 	defer conn.Close()
-	log.GetLogger(ctx).Infof("Broadcasting UDP packet to %s on interface %s", net.IPv4bcast, iface)
-	packet := append(UDPIPPayloadPrefix, ip.To4()...)
+	log.GetLogger(ctx).Infof("Broadcasting UDP packet to %s", net.IPv4bcast)
+	packet, err := EncodeUDPPacket(s.IP, nil)
+	if err != nil {
+		return fmt.Errorf("failed to encode UDP packet: %w", err)
+	}
 	n, err := conn.Write(packet)
 	if err != nil {
 		return fmt.Errorf("failed to write UDP packet: %w", err)
@@ -521,7 +403,7 @@ func (s *Server) broadcastUDP(ctx context.Context, iface string, ip net.IP) erro
 	if n != len(packet) {
 		return fmt.Errorf("failed to write full UDP packet, wrote %d bytes, expected %d", n, len(packet))
 	}
-	log.GetLogger(ctx).Debugf("Broadcasted UDP packet to %s on interface %s", net.IPv4bcast, iface)
+	log.GetLogger(ctx).Debugf("Broadcasted UDP packet to %s", net.IPv4bcast)
 	return nil
 }
 
