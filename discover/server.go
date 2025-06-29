@@ -346,6 +346,10 @@ func (s *Server) handleUDPPacket(ctx context.Context, packet []byte) error {
 		log.GetLogger(ctx).Debugf("Received empty primary IP in UDP packet")
 		return fmt.Errorf("received empty primary IP in UDP packet")
 	}
+	if payload.PrimaryIP == s.LocalIP {
+		log.GetLogger(ctx).Debugf("Ignoring UDP packet from self %s", s.LocalIP)
+		return nil // Ignore packets from self
+	}
 	primaryIP := net.ParseIP(payload.PrimaryIP)
 	if primaryIP == nil {
 		log.GetLogger(ctx).Debugf("Failed to parse primary IP %s from UDP packet", payload.PrimaryIP)
