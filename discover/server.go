@@ -322,7 +322,7 @@ func (s *Server) runUDPListener(ctx context.Context, listener *net.UDPConn, buff
 			log.GetLogger(ctx).Infof("Error reading from UDP: %v", err)
 			return err
 		}
-		fmt.Println("Received UDP packet from", addr, "with size", n)
+		fmt.Println("Received UDP packet from", addr, "with size", n, addr.IP, s.LocalIP)
 		if addr.IP.To4().String() == s.LocalIP {
 			log.GetLogger(ctx).Debugf("Ignoring UDP packet from self %s", addr.IP)
 			continue // Ignore packets from self
