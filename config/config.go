@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"regexp"
+	"sort"
+	"strconv"
 
 	"github.com/mat285/linklan/log"
 )
@@ -35,6 +38,7 @@ type IFace struct {
 	IP               string           `yaml:"ip,omitempty" json:"ip,omitempty"`
 	Priority         int              `yaml:"priority,omitempty" json:"priority,omitempty"`
 	Disabled         bool             `yaml:"disabled,omitempty" json:"disabled,omitempty"`
+	Speed            int              `yaml:"-" json:"-"` // Speed is not serialized, used internally
 }
 
 func (i IFace) MatchesName(name string) bool {
@@ -153,6 +157,46 @@ func (c *Config) Resolve(ctx context.Context) (context.Context, error) {
 		return nil, fmt.Errorf("bonding is not supported yet")
 	}
 	return ctx, nil
+}
+
+func (c *Config) SortInterfaces(ifaces []string) {
+	if len(c.Interfaces) == 0 {
+		sort.Strings(ifaces)
+		return
+	}
+
+	sortable := make([]IFace, len(ifaces))
+	for i, ifaceName := range ifaces {
+		for _, iface := range c.Interfaces {
+			if iface.MatchesName(ifaceName) {
+				sortable[i] = iface
+				sortable[i].IFaceIndentifier.Name = ifaceName // Ensure the name is set
+				data, err := os.ReadFile("/sys/class/net/" + ifaceName + "/speed")
+				if err == nil {
+					if speed, err := strconv.Atoi(string(data)); err == nil {
+						sortable[i].Speed = speed
+					}
+				}
+				break
+			}
+		}
+		if sortable[i].IFaceIndentifier.IsZero() {
+			// If no matching interface found, use a default IFace with zero values
+			sortable[i] = IFace{
+				IFaceIndentifier: IFaceIndentifier{Name: ifaceName},
+				Priority:         0, // Default priority
+			}
+		}
+	}
+	sort.Slice(ifaces, func(i, j int) bool {
+		if sortable[i].Priority == sortable[j].Priority {
+			// if sortable[i].Speed == sortable[j].Speed {
+			return sortable[i].IFaceIndentifier.Name < sortable[j].IFaceIndentifier.Name
+			// }
+			// return sortable[i].Speed > sortable[j].Speed // Higher speed first
+		}
+		return sortable[i].IFaceIndentifier.Name < sortable[j].IFaceIndentifier.Name
+	})
 }
 
 func ParseCidr(cidr string) (string, error) {

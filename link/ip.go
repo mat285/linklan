@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"sort"
 	"strings"
 
 	"github.com/mat285/linklan/config"
@@ -94,12 +93,15 @@ func SetupDirectInterfaces(ctx context.Context, ifaces []string) error {
 		return fmt.Errorf("failed to find primary network IP: %w", err)
 	}
 	log.GetLogger(ctx).Info("Found primary network IP:", primaryIP)
-	sort.Strings(ifaces)
-	iface := ifaces[0]
-	if err := AssignIPAndCidr(ctx, iface, primaryIP, 0, len(ifaces) == 1 || iface == BondInterfaceName); err != nil {
-		return fmt.Errorf("failed to assign IP and CIDR for interface %s: %w", iface, err)
+	cfg := config.GetConfig(ctx)
+	cfg.SortInterfaces(ifaces)
+	for i, iface := range ifaces {
+		log.GetLogger(ctx).Infof("Setting up interface %s with index %d", iface, i)
+		if err := AssignIPAndCidr(ctx, iface, primaryIP, byte(i), true); err != nil {
+			return fmt.Errorf("failed to assign IP and CIDR for interface %s: %w", iface, err)
+		}
+		log.GetLogger(ctx).Info("Assigned IP and CIDR for interface:", iface)
 	}
-	log.GetLogger(ctx).Info("Assigned IP and CIDR for interface:", iface)
 	return nil
 }
 
@@ -545,7 +547,6 @@ func CIDRToPrefix(cidr string) (string, error) {
 }
 
 func IPForIndex(primary string, idx byte) (net.IP, *net.IPNet, error) {
-	fmt.Println("IPForIndex called with primary:", primary, "and index:", idx)
 	primaryCidr, primaryNet, err := net.ParseCIDR(primary)
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid primary CIDR format: %w", err)

@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	mrand "math/rand"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,7 +34,8 @@ var (
 	SpeedTestInterval         = 60 * time.Second
 	SpeedTestBufferSize       = 1024 * 1024
 
-	PingInterval = 5 * time.Second
+	PingInterval = 1 * time.Second
+	PingTimeout  = 3 * time.Second
 
 	MetricName = "link_speed"
 )
@@ -45,8 +48,9 @@ type udpPing struct {
 }
 
 type Server struct {
-	Port int
-	IP   string
+	Port    int
+	LocalIP string
+	IP      string
 
 	lock   sync.Mutex
 	cancel context.CancelFunc
@@ -62,9 +66,10 @@ type Server struct {
 	udpPingsLock sync.Mutex          // Lock for udpPings
 }
 
-func NewServer(ip string, port int) *Server {
+func NewServer(localIP, listenIP string, port int) *Server {
 	return &Server{
-		IP:             ip,
+		LocalIP:        localIP,
+		IP:             listenIP,
 		Port:           port,
 		peers:          make(map[[4]byte]net.Conn),
 		knownPeers:     make(map[string]struct{}),
@@ -141,7 +146,7 @@ func (s *Server) SearchForPeers(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(60 * time.Second):
+		case <-time.After(time.Duration(rand.Intn(2500)+60000) * time.Millisecond):
 		}
 	}
 }
@@ -149,13 +154,11 @@ func (s *Server) SearchForPeers(ctx context.Context) error {
 func (s *Server) searchWholeLan(ctx context.Context, lan byte) error {
 	var err error
 	log.GetLogger(ctx).Info("Searching whole LAN with ID", lan)
-	localIP := net.ParseIP(s.IP).To4()
-	cfg := config.GetConfig(ctx)
-	if cfg != nil {
-		localIP, _, err = link.IPForIndex(cfg.Lan.CIDR, lan)
-		if err != nil {
-			return fmt.Errorf("failed to get local IP for LAN ID %d: %w", lan, err)
-		}
+	localIP := net.ParseIP(s.LocalIP).To4()
+	cidrSuffix := "/" + strings.Split(config.GetConfig(ctx).Lan.CIDR, "/")[1]
+	localIP, _, err = link.IPForIndex(localIP.String()+cidrSuffix, lan)
+	if err != nil {
+		return fmt.Errorf("failed to get local IP for LAN ID %d: %w", lan, err)
 	}
 	log.GetLogger(ctx).Infof("Using local IP %s for lan index %d", localIP, lan)
 	localID := localIP[len(localIP)-1]
@@ -252,8 +255,8 @@ func (s *Server) runListener(ctx context.Context, network string, listener net.L
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			go s.handleConnection(ctx, conn)
 		}
+		go s.handleConnection(ctx, link.WrapConn(conn))
 	}
 }
 
@@ -414,7 +417,8 @@ func (s *Server) tryPingPeer(ctx context.Context, ip net.IP, port int) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to %s: %w", addr, err)
 	}
-	go s.handleConnection(ctx, conn)
+	lc := link.WrapConn(conn)
+	go s.handleConnection(ctx, lc)
 	return nil
 }
 
@@ -441,8 +445,9 @@ func (s *Server) tryReconnect(ctx context.Context, ip net.IP) error {
 		log.GetLogger(ctx).Debug("Reconnecting to peer at", addr)
 		conn, err := net.DialTimeout("tcp4", addr, DialTimeout)
 		if err == nil {
+			lc := link.WrapConn(conn)
 			log.GetLogger(ctx).Debugf("Successfully reconnected to peer at %s", addr)
-			go s.handleConnection(ctx, conn)
+			go s.handleConnection(ctx, lc)
 			return nil
 		}
 		log.GetLogger(ctx).Debugf("Failed to reconnect to peer at %s: %v", addr, err)
@@ -450,7 +455,7 @@ func (s *Server) tryReconnect(ctx context.Context, ip net.IP) error {
 	return fmt.Errorf("failed to reconnect to peer with IP %s after %d attempts", ip, maxAttempts)
 }
 
-func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
+func (s *Server) handleConnection(ctx context.Context, conn *link.Conn) {
 	defer conn.Close()
 	ip := addressToIP(conn.RemoteAddr().String())
 	log.GetLogger(ctx).Debugf("Handling connection from %s", ip)
@@ -463,7 +468,7 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	s.handleConnRW(ctx, conn)
 }
 
-func (s *Server) addNewConn(ctx context.Context, conn net.Conn) bool {
+func (s *Server) addNewConn(ctx context.Context, conn *link.Conn) bool {
 	ip := addressToIP(conn.RemoteAddr().String())
 
 	s.peersLock.Lock()
@@ -481,7 +486,7 @@ func (s *Server) addNewConn(ctx context.Context, conn net.Conn) bool {
 	return true
 }
 
-func (s *Server) cleanupConn(ctx context.Context, conn net.Conn) {
+func (s *Server) cleanupConn(ctx context.Context, conn *link.Conn) {
 	ip := [4]byte(addressToIP(conn.RemoteAddr().String()))
 
 	s.peersLock.Lock()
@@ -493,7 +498,7 @@ func (s *Server) cleanupConn(ctx context.Context, conn net.Conn) {
 	delete(s.peers, ip)
 }
 
-func (s *Server) handleConnRW(ctx context.Context, conn net.Conn) {
+func (s *Server) handleConnRW(ctx context.Context, conn *link.Conn) {
 	var rErr, wErr error
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(ctx)
@@ -503,7 +508,7 @@ func (s *Server) handleConnRW(ctx context.Context, conn net.Conn) {
 		defer cancel()
 		wErr = s.writeConn(ctx, conn)
 		if wErr != nil {
-			log.GetLogger(ctx).Errorf("Error during write speed test: %v", wErr)
+			log.GetLogger(ctx).Errorf("Error writing to connection: %v", wErr)
 		}
 	}(&wg)
 	go func(wg *sync.WaitGroup) {
@@ -517,37 +522,54 @@ func (s *Server) handleConnRW(ctx context.Context, conn net.Conn) {
 	wg.Wait()
 }
 
-func (s *Server) writeConn(ctx context.Context, conn net.Conn) error {
+func (s *Server) writeConn(ctx context.Context, conn *link.Conn) error {
+	defer conn.Close()
+	log.GetLogger(ctx).Debugf("Starting write loop for connection %s", conn.RemoteAddr().String())
+	lastPing := time.Now()
 	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if time.Since(lastPing) > PingTimeout {
+			log.GetLogger(ctx).Infof("No ping response for %s, closing connection", conn.RemoteAddr().String())
+			return fmt.Errorf("no ping response for %s, closing connection", conn.RemoteAddr().String())
 		}
-		conn.SetWriteDeadline(time.Now().Add(PingInterval))
-		n, err := conn.Write(PingBytes)
-		if err != nil {
-			return err
-		}
-		if n != len(PingBytes) {
-			return fmt.Errorf("failed to write full ping bytes to connection, wrote %d bytes, expected %d", n, len(PingBytes))
-		}
-
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(PingInterval):
 		}
+		if !conn.IsOpen() {
+			log.GetLogger(ctx).Infof("Connection %s is closed, stopping write loop", conn.RemoteAddr().String())
+			return fmt.Errorf("connection %s is closed, stopping write loop", conn.RemoteAddr().String())
+		}
+		conn.SetWriteDeadline(time.Now().Add(PingInterval))
+		n, err := conn.Write(PingBytes)
+		if err != nil {
+			if !errors.Is(err, os.ErrDeadlineExceeded) {
+				return err
+			}
+			continue
+		}
+		if n != len(PingBytes) {
+			log.GetLogger(ctx).Errorf("failed to write full ping bytes to connection, wrote %d bytes, expected %d", n, len(PingBytes))
+			continue
+		}
+		lastPing = time.Now()
+		log.GetLogger(ctx).Debugf("Wrote ping to %s, bytes sent: %d", conn.RemoteAddr().String(), n)
 	}
 }
 
-func (s *Server) readConn(ctx context.Context, conn net.Conn) error {
+func (s *Server) readConn(ctx context.Context, conn *link.Conn) error {
+	defer conn.Close()
+	log.GetLogger(ctx).Debugf("Starting read loop for connection %s", conn.RemoteAddr().String())
 	buffer := make([]byte, SpeedTestBufferSize)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+		}
+		if !conn.IsOpen() {
+			log.GetLogger(ctx).Infof("Connection %s is closed, stopping read loop", conn.RemoteAddr().String())
+			return fmt.Errorf("connection %s is closed, stopping read loop", conn.RemoteAddr().String())
 		}
 		conn.SetReadDeadline(time.Now().Add(2 * PingInterval))
 		_, err := conn.Read(buffer)
