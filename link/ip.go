@@ -516,7 +516,6 @@ func CIDRToPrefix(cidr string) (string, error) {
 }
 
 func IPForIndex(primary string, idx byte) (net.IP, *net.IPNet, error) {
-	fmt.Println("IPForIndex called with primary:", primary, "and index:", idx)
 	primaryCidr, primaryNet, err := net.ParseCIDR(primary)
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid primary CIDR format: %w", err)

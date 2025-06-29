@@ -1,4 +1,4 @@
-VERSION ?= v0.3.1-test
+VERSION ?= v0.4.0
 GIT_SHA ?= $(shell git log --pretty=format:'%H' -n 1 2> /dev/null | cut -c1-8)
 
 .PHONY: release-all
@@ -15,7 +15,7 @@ create-release:
 .PHONY: push-files
 push-files:
 	@echo "Pushing files to GitHub release..."
-	gh release upload ${VERSION} build/linklandaemon_linux_amd64 build/linklandaemon_linux_arm64 build/linklandaemon_darwin_arm64 linklandaemon.service install.sh --clobber
+	gh release upload ${VERSION} build/linklandaemon_linux_amd64 build/linklandaemon_linux_arm64 build/linklandaemon_darwin_arm64 linklandaemon.service install.sh _config/example.yml --clobber
 
 .PHONY: build
 build:
