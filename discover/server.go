@@ -311,6 +311,7 @@ func (s *Server) runUDPListener(ctx context.Context, listener *net.UDPConn, buff
 		default:
 		}
 
+		fmt.Println("Reading from UDP listener")
 		// listener.SetReadDeadline(time.Now().Add(5 * time.Second))
 		n, addr, err := listener.ReadFromUDP(buffer)
 		if err != nil {
@@ -321,6 +322,7 @@ func (s *Server) runUDPListener(ctx context.Context, listener *net.UDPConn, buff
 			log.GetLogger(ctx).Infof("Error reading from UDP: %v", err)
 			return err
 		}
+		fmt.Println("Received UDP packet from", addr, "with size", n)
 		if addr.IP.To4().String() == s.IP {
 			log.GetLogger(ctx).Debugf("Ignoring UDP packet from self %s", addr.IP)
 			continue // Ignore packets from self
