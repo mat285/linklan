@@ -47,6 +47,11 @@ sudo mv linklandaemon.service /etc/systemd/system/linklandaemon.service
 sudo chmod 644 /etc/systemd/system/linklandaemon.service
 sudo chown root:root /etc/systemd/system/linklandaemon.service
 
+curl --fail-with-body -Lo linklandaemon https://github.com/mat285/linklan/releases/download/${VERSION}/example.yml
+sudo mkdir -p /etc/linklandaemon
+sudo mv linklandaemon /etc/linklandaemon/example.yml
+sudo chown root:root /etc/linklandaemon/example.yml
+
 sudo mkdir -p /etc/linklandaemon
 sudo chown root:root /etc/linklandaemon
 
