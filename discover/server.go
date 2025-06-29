@@ -323,7 +323,7 @@ func (s *Server) runUDPListener(ctx context.Context, listener *net.UDPConn, buff
 			return err
 		}
 		fmt.Println("Received UDP packet from", addr, "with size", n)
-		if addr.IP.To4().String() == s.IP {
+		if addr.IP.To4().String() == s.LocalIP {
 			log.GetLogger(ctx).Debugf("Ignoring UDP packet from self %s", addr.IP)
 			continue // Ignore packets from self
 		}
@@ -397,7 +397,7 @@ func (s *Server) broadcastUDP(ctx context.Context) error {
 	}
 	defer conn.Close()
 	log.GetLogger(ctx).Infof("Broadcasting UDP packet to %s", net.IPv4bcast)
-	packet, err := EncodeUDPPacket(s.IP, nil)
+	packet, err := EncodeUDPPacket(s.LocalIP, nil)
 	if err != nil {
 		return fmt.Errorf("failed to encode UDP packet: %w", err)
 	}
