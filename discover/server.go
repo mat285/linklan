@@ -175,11 +175,13 @@ func (s *Server) searchBySearchIP(ctx context.Context) error {
 			continue
 		}
 
+		log.GetLogger(ctx).Infof("Searching LAN IPs for peers on interface %s", iface)
 		err = s.searchLanIPForPeers(ctx, localIP[len(localIP)-1], net.IP(link.SearchCidr[:]))
 		if err != nil {
 			log.GetLogger(ctx).Errorf("Failed to search LAN IP for peers on interface %s: %v", iface, err)
 		}
 
+		log.GetLogger(ctx).Infof("Tearing down search routes for interface %s", iface)
 		if err := link.TearDownSearchRoutes(ctx, iface); err != nil {
 			log.GetLogger(ctx).Errorf("Failed to tear down search routes for interface %s: %v", iface, err)
 			return err
