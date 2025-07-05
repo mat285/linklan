@@ -15,7 +15,7 @@ import (
 
 const (
 	DefaultPrimaryCIDR   = "192.168.1.0/24"
-	DefaultSecondaryCIDR = "192.168.0.0/24"
+	DefaultSecondaryCIDR = "10.69.0.0/16"
 )
 
 type Config struct {
@@ -27,9 +27,9 @@ type Config struct {
 }
 
 type Lan struct {
-	CIDR           string   `yaml:"cidr,omitempty" json:"cidr,omitempty"`
-	Iface          string   `yaml:"iface,omitempty" json:"iface,omitempty"`
-	SecondaryCIDRs []string `yaml:"secondaryCidrs,omitempty" json:"secondaryCidrs,omitempty"`
+	CIDR          string `yaml:"cidr,omitempty" json:"cidr,omitempty"`
+	Iface         string `yaml:"iface,omitempty" json:"iface,omitempty"`
+	SecondaryCIDR string `yaml:"secondaryCidr,omitempty" json:"secondaryCidr,omitempty"`
 }
 
 type IFace struct {
@@ -98,6 +98,9 @@ func (c *Config) SetDefaults() {
 	if c.Lan.CIDR == "" {
 		c.Lan.CIDR = DefaultPrimaryCIDR
 	}
+	if c.Lan.SecondaryCIDR == "" {
+		c.Lan.SecondaryCIDR = DefaultSecondaryCIDR
+	}
 }
 
 func (c *Config) Resolve(ctx context.Context) (context.Context, error) {
@@ -106,12 +109,15 @@ func (c *Config) Resolve(ctx context.Context) (context.Context, error) {
 	if _, err := ParseCidr(c.Lan.CIDR); err != nil {
 		return nil, fmt.Errorf("invalid primary CIDR [%q]: %w", c.Lan.CIDR, err)
 	}
-
-	for i, cidr := range c.Lan.SecondaryCIDRs {
-		if _, err := ParseCidr(cidr); err != nil {
-			return nil, fmt.Errorf("invalid secondary CIDR  index %d [%q]: %w", i, cidr, err)
-		}
+	if _, err := ParseCidr(c.Lan.SecondaryCIDR); err != nil {
+		return nil, fmt.Errorf("invalid secondary CIDR [%q]: %w", c.Lan.SecondaryCIDR, err)
 	}
+
+	// for i, cidr := range c.Lan.SecondaryCIDRs {
+	// 	if _, err := ParseCidr(cidr); err != nil {
+	// 		return nil, fmt.Errorf("invalid secondary CIDR  index %d [%q]: %w", i, cidr, err)
+	// 	}
+	// }
 
 	for i, iface := range c.Interfaces {
 		if iface.Match.IsZero() && iface.IFaceIndentifier.IsZero() {
