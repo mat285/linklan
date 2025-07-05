@@ -21,6 +21,10 @@ const (
 	BondInterfaceName = "bond0"
 )
 
+var (
+	SearchCidr = [4]byte{10, 69, 69, 0}
+)
+
 func EnsureDirectLan(ctx context.Context, peers []string) error {
 	ifaces, err := FindSecondaryNetworkInterface(ctx)
 	if err != nil {
@@ -83,6 +87,94 @@ func SetDirectRoutes(ctx context.Context, ifaces []string, peers []string) error
 	return nil
 }
 
+func AssignSearchIP(ctx context.Context, primaryIP string, iface string) error {
+	log.GetLogger(ctx).Info("Setting up search routes for interface:", iface)
+	pip, err := SearchIP(ctx, primaryIP)
+	if err != nil {
+		return fmt.Errorf("failed to get search IP from primary IP: %w", err)
+	}
+	siface, err := net.InterfaceByName(iface)
+	if err != nil {
+		return fmt.Errorf("failed to find interface %s: %w", iface, err)
+	}
+	addrs, err := siface.Addrs()
+	if err != nil {
+		return fmt.Errorf("failed to get addresses for interface %s: %w", iface, err)
+	}
+
+	for _, addr := range addrs {
+		if ipNet, ok := addr.(*net.IPNet); ok && ipNet.IP.To4() != nil {
+			if ipNet.IP.Equal(pip) {
+				log.GetLogger(ctx).Info("Search IP already assigned to interface:", iface)
+				return nil
+			}
+		}
+	}
+	log.GetLogger(ctx).Info("Assigning search IP", SearchCidr, "to interface", iface)
+	err = AssignIPToInterface(ctx, iface, pip.String()+"/32")
+	if err != nil {
+		return fmt.Errorf("failed to assign search IP %s to interface %s: %w", SearchCidr, iface, err)
+	}
+	log.GetLogger(ctx).Info("Search IP assigned successfully:", SearchCidr)
+	return nil
+}
+
+func SetupSearchRoutes(ctx context.Context, iface string, ip net.IP) error {
+	log.GetLogger(ctx).Info("Assigning search IP", ip, "to interface", iface)
+	routes, err := FindInterfaceRoutes(ctx, iface)
+	if err != nil {
+		return fmt.Errorf("failed to find routes for interface %s: %w", iface, err)
+	}
+	cidr := ip.String() + "/24"
+	for _, route := range routes {
+		if route == cidr {
+			log.GetLogger(ctx).Info("Search IP already assigned to interface:", iface)
+			return nil
+		}
+	}
+	err = AddInterfaceRoute(ctx, iface, cidr)
+	if err != nil {
+		return fmt.Errorf("failed to assign search IP %s to interface %s: %w", ip, iface, err)
+	}
+	log.GetLogger(ctx).Info("Search IP assigned successfully:", ip)
+	return nil
+}
+
+func TearDownSearchRoutes(ctx context.Context, iface string) error {
+	log.GetLogger(ctx).Info("Tearing down search routes for interface:", iface)
+	routes, err := FindInterfaceRoutes(ctx, iface)
+	if err != nil {
+		return fmt.Errorf("failed to find routes for interface %s: %w", iface, err)
+	}
+
+	prefix := fmt.Sprintf("%d.%d.%d.", SearchCidr[0], SearchCidr[1], SearchCidr[2])
+
+	for _, route := range routes {
+		if strings.HasPrefix(route, prefix) {
+			log.GetLogger(ctx).Info("Removing search route", route, "from interface", iface)
+			err = RemoveInterfaceRoute(ctx, iface, route)
+			if err != nil {
+				return fmt.Errorf("failed to remove search route %s from interface %s: %w", route, iface, err)
+			}
+			log.GetLogger(ctx).Info("Search route removed successfully:", route)
+		}
+	}
+	log.GetLogger(ctx).Info("No search routes found for interface:", iface)
+	return nil
+}
+
+func SearchIP(ctx context.Context, primaryIP string) (net.IP, error) {
+	log.GetLogger(ctx).Info("Searching for IP in CIDR:", SearchCidr)
+	pip := net.ParseIP(primaryIP).To4()
+	if pip == nil {
+		return nil, fmt.Errorf("invalid primary IP format: %q", primaryIP)
+	}
+	copy(SearchCidr[:3], pip[:3])
+	ip := net.IPv4(SearchCidr[0], SearchCidr[1], SearchCidr[2], 0)
+	log.GetLogger(ctx).Info("Found search IP:", ip)
+	return ip, nil
+}
+
 func SetupDirectInterfaces(ctx context.Context, ifaces []string) error {
 	if len(ifaces) == 0 {
 		return fmt.Errorf("no secondary network interfaces found")
@@ -100,6 +192,9 @@ func SetupDirectInterfaces(ctx context.Context, ifaces []string) error {
 		if err := AssignIPAndCidr(ctx, iface, primaryIP, byte(i), true); err != nil {
 			return fmt.Errorf("failed to assign IP and CIDR for interface %s: %w", iface, err)
 		}
+		// if err := AssignSearchIP(ctx, primaryIP, iface); err != nil {
+		// 	return fmt.Errorf("failed to assign search IP for interface %s: %w", iface, err)
+		// }
 		log.GetLogger(ctx).Info("Assigned IP and CIDR for interface:", iface)
 	}
 	return nil
@@ -410,7 +505,12 @@ func AssignSecondaryLanIp(ctx context.Context, interfaceName string, primaryIP s
 		return fmt.Errorf("failed to get secondary IP from primary IP: %w", err)
 	}
 	log.GetLogger(ctx).Info("Assigning secondary LAN IP", secondaryIP, "to interface", interfaceName)
-	_, err = ExecIPCommand(ctx, "addr", "add", secondaryIP, "dev", interfaceName)
+	return AssignIPToInterface(ctx, interfaceName, secondaryIP)
+}
+
+func AssignIPToInterface(ctx context.Context, interfaceName string, ip string) error {
+	log.GetLogger(ctx).Info("Assigning IP", ip, "to interface", interfaceName)
+	_, err := ExecIPCommand(ctx, "addr", "add", ip, "dev", interfaceName)
 	return err
 }
 
@@ -525,15 +625,10 @@ func IPForIndex(primary string, idx byte) (net.IP, *net.IPNet, error) {
 	primaryCidr = primaryCidr.To4()
 	size, _ := primaryNet.Mask.Size()
 	ipByte := size/8 - 1
-	lastSpecified := primaryCidr[ipByte]
 	if ipByte == 0 {
 		idx++ // on /8 we can't use 0 as the start byte
 	}
-	if idx >= lastSpecified {
-		primaryCidr[ipByte] += idx
-	} else {
-		primaryCidr[ipByte] = idx
-	}
+	primaryCidr[ipByte] += idx
 	return primaryCidr, primaryNet, nil
 }
 
