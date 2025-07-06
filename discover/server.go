@@ -9,6 +9,7 @@ import (
 	mrand "math/rand"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -92,7 +93,7 @@ func (s *Server) Start(ctx context.Context) error {
 	return err
 }
 
-func (s *Server) ActivePeers(ctx context.Context) []string {
+func (s *Server) ActivePeers(ctx context.Context) map[string][]string {
 	localIP, _, err := net.ParseCIDR(config.GetConfig(ctx).Lan.CIDR)
 	if err != nil {
 		log.GetLogger(context.Background()).Errorf("Failed to parse local CIDR: %v", err)
@@ -102,14 +103,19 @@ func (s *Server) ActivePeers(ctx context.Context) []string {
 
 	s.peersLock.Lock()
 	defer s.peersLock.Unlock()
-	peers := make([]string, 0, len(s.peers))
-	for ip := range s.peers {
-		peer := make(net.IP, len(localIP))
-		copy(peer, localIP)
-		peer[len(peer)-1] = ip[len(ip)-1] // Use the last byte of local IP for the peer
-		peers = append(peers, peer.String())
+	peerMap := make(map[string][]string)
+	for iface, pps := range s.peers {
+		peers := make([]string, 0, len(s.peers))
+		for ip := range pps {
+			peer := make(net.IP, len(localIP))
+			copy(peer, localIP)
+			peer[len(peer)-1] = ip[len(ip)-1] // Use the last byte of local IP for the peer
+			peers = append(peers, peer.String())
+		}
+		sort.Strings(peers)
+		peerMap[iface] = peers
 	}
-	return peers
+	return peerMap
 }
 
 func (s *Server) SearchForPeers(ctx context.Context) error {

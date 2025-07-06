@@ -32,7 +32,7 @@ type Daemon struct {
 	Log *log.Logger
 
 	LocalIP string
-	Peers   []string
+	Peers   map[string][]string
 
 	Watcher *link.DeviceWatcher
 
@@ -185,33 +185,61 @@ func (d *Daemon) ensureLanUnsafe(ctx context.Context) error {
 func (d *Daemon) syncPeers(ctx context.Context) (bool, error) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	d.Log.Info("Running peer sync")
-	d.Log.Info("Current Peers:", d.Peers)
-	// peers, err := discover.GetActiveKubePeers(ctx, d.LocalIP)
-	// if err != nil {
-	// 	return false, err
-	// }
+	if d.Peers == nil {
+		d.Peers = make(map[string][]string)
+	}
+	d.Log.Info("Syncing peers with local IP:", d.LocalIP)
 	peers := d.Server.ActivePeers(ctx)
-	sort.Strings(peers)
+	needsSync := false
+	checked := make(map[string]bool)
+	for iface, peerList := range peers {
+		needsSync = needsSync || d.syncIfacePeers(ctx, peerList, iface)
+		checked[iface] = true
+	}
 
-	needsSync := len(peers) != len(d.Peers)
+	for iface := range d.Peers {
+		if !checked[iface] {
+			d.Log.Info("Removing stale interface:", iface)
+			delete(d.Peers, iface)
+			needsSync = true
+		}
+	}
+	if !needsSync {
+		d.Log.Info("No peer changes detected, skipping LAN setup")
+		return false, nil
+	}
+	d.Log.Info("Peer changes detected, re-syncing LAN setup")
+	if err := d.ensureLanUnsafe(ctx); err != nil {
+		return false, fmt.Errorf("failed to ensure LAN setup after peer sync: %w", err)
+	}
+	d.Log.Info("LAN setup re-synced successfully")
+	return true, nil
+}
+
+func (d *Daemon) syncIfacePeers(ctx context.Context, peers []string, iface string) bool {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.Log.Info("Running peer sync")
+	d.Log.Info("Current Peers:", d.Peers, "Interface:", iface)
+
+	needsSync := len(peers) != len(d.Peers[iface])
 	if !needsSync {
 		sort.Strings(peers)
 		for i, peer := range peers {
-			if d.Peers[i] != peer {
+			if d.Peers[iface][i] != peer {
 				needsSync = true
 				break
 			}
 		}
 	}
-	d.Peers = peers
+	d.Peers[iface] = peers
 
 	if !needsSync {
 		d.Log.Info("No peer changes detected, skipping LAN setup")
 		return false, nil
 	}
 	d.Log.Info("Peer changes detected, re-syncing LAN setup")
-	return true, d.ensureLanUnsafe(ctx)
+	return true
 }
 
 func (d *Daemon) onInterfaceChange(ctx context.Context, iface net.Interface, mode link.EventMode) error {
