@@ -189,7 +189,10 @@ func (d *Daemon) syncPeers(ctx context.Context) (bool, error) {
 		d.Peers = make(map[string][]string)
 	}
 	d.Log.Info("Syncing peers with local IP:", d.LocalIP)
-	peers := d.Server.ActivePeers(ctx)
+	peers, err := discover.GetActiveKubePeers(ctx, d.LocalIP)
+	if err != nil {
+		return false, fmt.Errorf("failed to get active peers: %w", err)
+	}
 	needsSync := false
 	checked := make(map[string]bool)
 	for iface, peerList := range peers {
