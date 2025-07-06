@@ -138,8 +138,13 @@ func (d *Daemon) init(ctx context.Context) error {
 		if err == nil {
 			d.LocalIP = ip
 			d.Log.Info("Daemon initialized with primary network IP:", d.LocalIP)
-			return nil
+			err = link.AssignSearchIPToPrimary(ctx, ip)
+			if err == nil {
+				return nil
+			}
+			log.GetLogger(ctx).Error("Failed to assign search IP to primary network interface:", err)
 		}
+
 		d.Log.Info("Attempt", attempts+1, "to find primary network IP failed:", err)
 		if attempts < MaxInitAttempts {
 			attempts++
