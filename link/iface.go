@@ -15,9 +15,6 @@ func SortInterfacesBySpeed(ifaces []string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get interface speeds: %w", err)
 	}
-	if len(speeds) == 0 {
-		return nil, fmt.Errorf("no valid interface speeds found")
-	}
 	sort.Slice(ifaces, func(i, j int) bool {
 		speedI, okI := speeds[ifaces[i]]
 		speedJ, okJ := speeds[ifaces[j]]
