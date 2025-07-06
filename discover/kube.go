@@ -61,5 +61,39 @@ func GetActiveKubePeers(ctx context.Context, localIP string) (map[string][]strin
 		log.GetLogger(ctx).Info("No valid IPs found to ping")
 		return nil, nil
 	}
-	return PingAllInterfaces(ctx, nodes, 16443)
+	peers, err := PingAllInterfaces(ctx, nodes, 16443)
+	if err != nil {
+		log.GetLogger(ctx).Error("Failed to ping interfaces:", err)
+		return nil, err
+	}
+	ifaces := make([]string, 0, len(peers))
+	seen := make(map[string]bool)
+	for iface := range peers {
+		ifaces = append(ifaces, iface)
+	}
+	ifaces, err = link.SortInterfacesBySpeed(ifaces)
+	if err != nil {
+		log.GetLogger(ctx).Error("Failed to sort interfaces by speed:", err)
+		return nil, err
+	}
+	activePeers := make(map[string][]string)
+	for _, iface := range ifaces {
+		if _, ok := peers[iface]; !ok {
+			log.GetLogger(ctx).Info("No active peers found on interface:", iface)
+			continue
+		}
+		activePeers[iface] = make([]string, 0, len(peers[iface]))
+		for _, peer := range peers[iface] {
+			if !seen[peer] {
+				seen[peer] = true
+				activePeers[iface] = append(activePeers[iface], peer)
+			}
+		}
+	}
+	log.GetLogger(ctx).Info("Active peers found:", activePeers)
+	if len(activePeers) == 0 {
+		log.GetLogger(ctx).Info("No active peers found")
+		return nil, nil
+	}
+	return activePeers, nil
 }
