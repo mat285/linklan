@@ -231,6 +231,32 @@ func AssignIPAndCidr(ctx context.Context, iface string, primaryIP string, index 
 	return SetInterfaceUp(ctx, iface)
 }
 
+func AssignSearchIPToPrimary(ctx context.Context, primaryIP string) error {
+	iface, _, err := FindPhysicalInterfaces(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to find physical interfaces: %w", err)
+	}
+	if iface == nil {
+		return fmt.Errorf("no primary network interface found")
+	}
+	sip, err := SearchIP(ctx, primaryIP)
+	if err != nil {
+		return fmt.Errorf("failed to get search IP from primary IP: %w", err)
+	}
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return fmt.Errorf("failed to get addresses for primary interface %s: %w", iface.Name, err)
+	}
+
+	for _, addr := range addrs {
+		if strings.HasPrefix(addr.String(), sip.String()) {
+			return nil
+		}
+	}
+	_, err = ExecIPCommand(ctx, "addr", "add", sip.String()+"/32", "dev", iface.Name)
+	return err
+}
+
 func FindPrimaryNetworkIP(ctx context.Context) (string, error) {
 	log.GetLogger(ctx).Info("Finding primary network IP")
 	prefix := PrimaryLanIpPrefix
