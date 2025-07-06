@@ -73,21 +73,21 @@ func (d *Daemon) Start(ctx context.Context) error {
 	}()
 	defer d.Watcher.Stop()
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := d.Server.Start(ctx); err != nil {
-			d.Log.Info("Server stopped with error:", err)
-			d.lock.Lock()
-			defer d.lock.Unlock()
-			if d.cancel != nil {
-				d.cancel()
-				d.cancel = nil
-			}
-		}
-		log.GetLogger(ctx).Info("Server stopped")
-	}()
-	defer d.Server.Stop()
+	// wg.Add(1)
+	// go func() {
+	// 	defer wg.Done()
+	// 	if err := d.Server.Start(ctx); err != nil {
+	// 		d.Log.Info("Server stopped with error:", err)
+	// 		d.lock.Lock()
+	// 		defer d.lock.Unlock()
+	// 		if d.cancel != nil {
+	// 			d.cancel()
+	// 			d.cancel = nil
+	// 		}
+	// 	}
+	// 	log.GetLogger(ctx).Info("Server stopped")
+	// }()
+	// defer d.Server.Stop()
 
 	// initial sync before starting the ticker
 	if err := d.runSync(ctx); err != nil {

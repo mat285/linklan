@@ -177,8 +177,8 @@ func SearchIP(ctx context.Context, primaryIP string) (net.IP, error) {
 	if pip == nil {
 		return nil, fmt.Errorf("invalid primary IP format: %q", primaryIP)
 	}
-	copy(SearchCidr[:3], pip[:3])
-	ip := net.IPv4(SearchCidr[0], SearchCidr[1], SearchCidr[2], 0)
+
+	ip := net.IPv4(SearchCidr[0], SearchCidr[1], SearchCidr[2], pip[3])
 	log.GetLogger(ctx).Info("Found search IP:", ip)
 	return ip, nil
 }
