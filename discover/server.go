@@ -46,7 +46,7 @@ type Server struct {
 	done   chan struct{}
 
 	peersLock sync.Mutex
-	peers     map[[4]byte]net.Conn
+	peers     map[string]map[[4]byte]net.Conn
 
 	knownPeersLock sync.Mutex
 	knownPeers     map[string]struct{} // Track known peers to avoid duplicates
@@ -57,7 +57,7 @@ func NewServer(localIP, listenIP string, port int) *Server {
 		LocalIP:        localIP,
 		IP:             listenIP,
 		Port:           port,
-		peers:          make(map[[4]byte]net.Conn),
+		peers:          make(map[string]map[[4]byte]net.Conn),
 		knownPeers:     make(map[string]struct{}),
 		peersLock:      sync.Mutex{},
 		knownPeersLock: sync.Mutex{},
@@ -121,26 +121,46 @@ func (s *Server) SearchForPeers(ctx context.Context) error {
 			return ctx.Err()
 		default:
 		}
-		lan := byte(0)
-		max := byte(1)
-		// if numIfaces, err := link.FindSecondaryNetworkInterface(ctx); err == nil {
-		// 	max = byte(len(numIfaces))
+		// lan := byte(0)
+		// max := byte(1)
+		// // if numIfaces, err := link.FindSecondaryNetworkInterface(ctx); err == nil {
+		// // 	max = byte(len(numIfaces))
+		// // }
+
+		// ifaces, err := link.FindSecondaryNetworkInterface(ctx)
+		// if err != nil {
+		// 	log.GetLogger(ctx).Errorf("Failed to find secondary network interfaces: %v", err)
+		// 	return err
 		// }
-		for lan < max {
-			select {
-			case <-ctx.Done():
-				log.GetLogger(ctx).Info("Stopping peer search due to context cancellation")
-				return ctx.Err()
-			default:
-			}
-			log.GetLogger(ctx).Info("Searching for peers on LAN ID", lan)
-			err := s.searchWholeLan(ctx, lan)
-			if err != nil {
-				log.GetLogger(ctx).Info("Error searching LAN:", err)
-			}
-			lan++
-		}
-		log.GetLogger(ctx).Info("Completed peer search cycle, waiting for next cycle")
+		// log.GetLogger(ctx).Infof("Found %d secondary network interfaces", len(ifaces))
+		// for _, iface := range ifaces {
+		// 	select {
+		// 	case <-ctx.Done():
+		// 		log.GetLogger(ctx).Info("Stopping peer search due to context cancellation")
+		// 		return ctx.Err()
+		// 	default:
+		// 	}
+		// 	log.GetLogger(ctx).Info("Searching for peers on interface", iface)
+		// 	err := s.searchInterface(ctx, iface)
+		// 	if err != nil {
+		// 		log.GetLogger(ctx).Info("Error searching interface:", err)
+		// 	}
+		// }
+		// for lan < max {
+		// 	select {
+		// 	case <-ctx.Done():
+		// 		log.GetLogger(ctx).Info("Stopping peer search due to context cancellation")
+		// 		return ctx.Err()
+		// 	default:
+		// 	}
+		// 	log.GetLogger(ctx).Info("Searching for peers on LAN ID", lan)
+		// 	err := s.searchWholeLan(ctx, lan)
+		// 	if err != nil {
+		// 		log.GetLogger(ctx).Info("Error searching LAN:", err)
+		// 	}
+		// 	lan++
+		// }
+		// log.GetLogger(ctx).Info("Completed peer search cycle, waiting for next cycle")
 
 		err := s.searchBySearchIP(ctx)
 		if err != nil {
@@ -152,6 +172,34 @@ func (s *Server) SearchForPeers(ctx context.Context) error {
 		case <-time.After(time.Duration(rand.Intn(2500)+60000) * time.Millisecond):
 		}
 	}
+}
+
+func (s *Server) searchInterface(ctx context.Context, iface string) error {
+	log.GetLogger(ctx).Infof("Searching for peers on interface %s", iface)
+	localIP := net.ParseIP(s.LocalIP).To4()
+	if localIP == nil {
+		err := fmt.Errorf("invalid local IP %s", s.LocalIP)
+		log.GetLogger(ctx).Errorf("Failed to parse local IP %s: %v", s.LocalIP, err)
+		return fmt.Errorf("failed to parse local IP %s: %w", s.LocalIP, err)
+	}
+	err := link.SetupSearchRoutes(ctx, iface, localIP)
+	if err != nil {
+		log.GetLogger(ctx).Errorf("Failed to setup search routes for interface %s: %v", iface, err)
+		return err
+	}
+
+	log.GetLogger(ctx).Infof("Searching LAN IPs for peers on interface %s", iface)
+	err = s.searchLanIPForPeers(ctx, iface, localIP[len(localIP)-1], net.IP(link.SearchCidr[:]))
+	if err != nil {
+		log.GetLogger(ctx).Errorf("Failed to search LAN IP for peers on interface %s: %v", iface, err)
+	}
+
+	log.GetLogger(ctx).Infof("Tearing down search routes for interface %s", iface)
+	if err := link.TearDownSearchRoutes(ctx, iface); err != nil {
+		log.GetLogger(ctx).Errorf("Failed to tear down search routes for interface %s: %v", iface, err)
+		return err
+	}
+	return nil
 }
 
 func (s *Server) searchBySearchIP(ctx context.Context) error {
@@ -176,7 +224,7 @@ func (s *Server) searchBySearchIP(ctx context.Context) error {
 		}
 
 		log.GetLogger(ctx).Infof("Searching LAN IPs for peers on interface %s", iface)
-		err = s.searchLanIPForPeers(ctx, localIP[len(localIP)-1], net.IP(link.SearchCidr[:]))
+		err = s.searchLanIPForPeers(ctx, iface, localIP[len(localIP)-1], net.IP(link.SearchCidr[:]))
 		if err != nil {
 			log.GetLogger(ctx).Errorf("Failed to search LAN IP for peers on interface %s: %v", iface, err)
 		}
@@ -191,7 +239,7 @@ func (s *Server) searchBySearchIP(ctx context.Context) error {
 	return nil
 }
 
-func (s *Server) searchWholeLan(ctx context.Context, lan byte) error {
+func (s *Server) searchWholeLan(ctx context.Context, iface string, lan byte) error {
 	var err error
 	log.GetLogger(ctx).Info("Searching whole LAN with ID", lan)
 	localIP := net.ParseIP(s.LocalIP).To4()
@@ -204,10 +252,10 @@ func (s *Server) searchWholeLan(ctx context.Context, lan byte) error {
 	localID := localIP[len(localIP)-1]
 	pingIP := make(net.IP, len(localIP))
 	copy(pingIP, localIP)
-	return s.searchLanIPForPeers(ctx, localID, pingIP)
+	return s.searchLanIPForPeers(ctx, iface, localID, pingIP)
 }
 
-func (s *Server) searchLanIPForPeers(ctx context.Context, localID byte, pingIP net.IP) error {
+func (s *Server) searchLanIPForPeers(ctx context.Context, iface string, localID byte, pingIP net.IP) error {
 	for i := 0; i <= 255; i++ {
 		ipID := byte(i)
 		if ipID == localID {
@@ -219,13 +267,13 @@ func (s *Server) searchLanIPForPeers(ctx context.Context, localID byte, pingIP n
 		default:
 		}
 		s.peersLock.Lock()
-		_, exists := s.peers[[4]byte(pingIP)]
+		_, exists := s.peers[iface][[4]byte(pingIP)]
 		s.peersLock.Unlock()
 
 		if !exists {
 			pingIP[len(pingIP)-1] = byte(i)
 			log.GetLogger(ctx).Debugf("Trying to ping peer with IP %s", pingIP)
-			err := s.tryPingPeer(ctx, pingIP, s.Port)
+			err := s.tryPingPeer(ctx, iface, pingIP, s.Port)
 			if err != nil {
 				log.GetLogger(ctx).Debugf("Failed to ping peer with IP %s: %v", pingIP, err)
 			}
@@ -257,7 +305,7 @@ func (s *Server) Listen(ctx context.Context) error {
 		if err != nil {
 			log.GetLogger(ctx).Info("Error accepting connection:", err)
 		}
-		go s.handleConnection(ctx, link.WrapConn(conn))
+		go s.handleConnection(ctx, "", link.WrapConn(conn))
 	}
 }
 
@@ -270,7 +318,7 @@ func (s *Server) Stop() {
 	}
 }
 
-func (s *Server) tryPingPeer(ctx context.Context, ip net.IP, port int) error {
+func (s *Server) tryPingPeer(ctx context.Context, iface string, ip net.IP, port int) error {
 	log.GetLogger(ctx).Debug("Pinging peer at", ip, "on port", port)
 	addr := net.JoinHostPort(ip.String(), fmt.Sprintf("%d", port))
 	conn, err := net.DialTimeout("tcp4", addr, DialTimeout)
@@ -278,11 +326,11 @@ func (s *Server) tryPingPeer(ctx context.Context, ip net.IP, port int) error {
 		return fmt.Errorf("failed to connect to %s: %w", addr, err)
 	}
 	lc := link.WrapConn(conn)
-	go s.handleConnection(ctx, lc)
+	go s.handleConnection(ctx, iface, lc)
 	return nil
 }
 
-func (s *Server) tryReconnect(ctx context.Context, ip net.IP) error {
+func (s *Server) tryReconnect(ctx context.Context, iface string, ip net.IP) error {
 	log.GetLogger(ctx).Info("Attempting to reconnect to peer with IP ID", ip)
 	maxAttempts := 1
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -293,7 +341,7 @@ func (s *Server) tryReconnect(ctx context.Context, ip net.IP) error {
 		}
 
 		s.lock.Lock()
-		_, exists := s.peers[[4]byte(ip)]
+		_, exists := s.peers[iface][[4]byte(ip)]
 		s.lock.Unlock()
 
 		if exists {
@@ -307,7 +355,7 @@ func (s *Server) tryReconnect(ctx context.Context, ip net.IP) error {
 		if err == nil {
 			lc := link.WrapConn(conn)
 			log.GetLogger(ctx).Debugf("Successfully reconnected to peer at %s", addr)
-			go s.handleConnection(ctx, lc)
+			go s.handleConnection(ctx, iface, lc)
 			return nil
 		}
 		log.GetLogger(ctx).Debugf("Failed to reconnect to peer at %s: %v", addr, err)
@@ -315,20 +363,54 @@ func (s *Server) tryReconnect(ctx context.Context, ip net.IP) error {
 	return fmt.Errorf("failed to reconnect to peer with IP %s after %d attempts", ip, maxAttempts)
 }
 
-func (s *Server) handleConnection(ctx context.Context, conn *link.Conn) {
+func (s *Server) handleConnection(ctx context.Context, iface string, conn *link.Conn) {
 	defer conn.Close()
+	if iface == "" {
+		localIP := addressToIP(conn.LocalAddr().String())
+		ifaces, err := link.FindSecondaryNetworkInterface(ctx)
+		if err != nil {
+			log.GetLogger(ctx).Errorf("Failed to find secondary network interfaces: %v", err)
+			return
+		}
+		if len(ifaces) == 0 {
+			log.GetLogger(ctx).Error("No secondary network interfaces found, cannot handle connection")
+			return
+		}
+		for _, ifc := range ifaces {
+			interfc, err := net.InterfaceByName(ifc)
+			if err != nil {
+				log.GetLogger(ctx).Errorf("Failed to get interface %s: %v", ifc, err)
+				continue
+			}
+			addrs, err := interfc.Addrs()
+			if err != nil {
+				log.GetLogger(ctx).Errorf("Failed to get addresses for interface %s: %v", ifc, err)
+				continue
+			}
+			for _, addr := range addrs {
+				if strings.Contains(addr.String(), localIP.String()) {
+					iface = ifc
+					log.GetLogger(ctx).Debugf("Using interface %s for connection from %s", iface, localIP)
+					break
+				}
+			}
+			if iface != "" {
+				break
+			}
+		}
+	}
 	ip := addressToIP(conn.RemoteAddr().String())
 	log.GetLogger(ctx).Debugf("Handling connection from %s", ip)
-	if !s.addNewConn(ctx, conn) {
+	if !s.addNewConn(ctx, iface, conn) {
 		log.GetLogger(ctx).Infof("Connection from %s already exists, closing new connection", ip)
 		return
 	}
-	defer s.cleanupConn(ctx, conn)
-	defer func() { go s.tryReconnect(ctx, ip) }() // Attempt to reconnect if the connection is closed unexpectedly
+	defer s.cleanupConn(ctx, iface, conn)
+	defer func() { go s.tryReconnect(ctx, iface, ip) }() // Attempt to reconnect if the connection is closed unexpectedly
 	s.handleConnRW(ctx, conn)
 }
 
-func (s *Server) addNewConn(ctx context.Context, conn *link.Conn) bool {
+func (s *Server) addNewConn(ctx context.Context, iface string, conn *link.Conn) bool {
 	ip := addressToIP(conn.RemoteAddr().String())
 
 	s.peersLock.Lock()
@@ -337,25 +419,25 @@ func (s *Server) addNewConn(ctx context.Context, conn *link.Conn) bool {
 	defer s.knownPeersLock.Unlock()
 	s.knownPeers[ip.String()] = struct{}{}
 
-	if _, exists := s.peers[[4]byte(ip)]; exists {
+	if _, exists := s.peers[iface][[4]byte(ip)]; exists {
 		log.GetLogger(ctx).Infof("Connection from %s already exists, closing older connection", ip)
 		return false
 	}
 	log.GetLogger(ctx).Infof("Adding new peer connection from %s", ip)
-	s.peers[[4]byte(ip)] = conn
+	s.peers[iface][[4]byte(ip)] = conn
 	return true
 }
 
-func (s *Server) cleanupConn(ctx context.Context, conn *link.Conn) {
+func (s *Server) cleanupConn(ctx context.Context, iface string, conn *link.Conn) {
 	ip := [4]byte(addressToIP(conn.RemoteAddr().String()))
 
 	s.peersLock.Lock()
 	defer s.peersLock.Unlock()
-	if s.peers[ip] != conn {
+	if s.peers[iface][ip] != conn {
 		return
 	}
 	log.GetLogger(ctx).Infof("Removing closed peer connection from %s", ip)
-	delete(s.peers, ip)
+	delete(s.peers[iface], ip)
 }
 
 func (s *Server) handleConnRW(ctx context.Context, conn *link.Conn) {

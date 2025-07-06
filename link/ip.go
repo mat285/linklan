@@ -25,7 +25,7 @@ var (
 	SearchCidr = [4]byte{10, 69, 69, 0}
 )
 
-func EnsureDirectLan(ctx context.Context, peers []string) error {
+func EnsureDirectLan(ctx context.Context, peersForIface map[string][]string) error {
 	ifaces, err := FindSecondaryNetworkInterface(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to find secondary network interface: %w", err)
@@ -37,18 +37,20 @@ func EnsureDirectLan(ctx context.Context, peers []string) error {
 	if err := SetupDirectInterfaces(ctx, ifaces); err != nil {
 		return fmt.Errorf("failed to setup direct interfaces: %w", err)
 	}
-	if len(peers) != 0 {
-		log.GetLogger(ctx).Info("Setting up direct routes for peers:", peers)
-		if err := SetDirectRoutes(ctx, ifaces, peers); err != nil {
-			return fmt.Errorf("failed to set direct routes: %w", err)
+	for _, iface := range ifaces {
+		peers := peersForIface[iface]
+		if len(peers) != 0 {
+			log.GetLogger(ctx).Info("Setting up direct routes for peers:", peers)
+			if err := SetDirectRoutes(ctx, iface, peers); err != nil {
+				return fmt.Errorf("failed to set direct routes: %w", err)
+			}
 		}
 	}
 	log.GetLogger(ctx).Info("Direct LAN setup completed successfully")
 	return nil
 }
 
-func SetDirectRoutes(ctx context.Context, ifaces []string, peers []string) error {
-	iface := ifaces[0]
+func SetDirectRoutes(ctx context.Context, iface string, peers []string) error {
 	existing, err := FindInterfaceRoutes(ctx, iface)
 	if err != nil {
 		return fmt.Errorf("failed to find existing routes for interface %s: %w", iface, err)
