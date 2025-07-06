@@ -123,7 +123,7 @@ func AssignSearchIP(ctx context.Context, primaryIP string, iface string) error {
 
 func SetupSearch(ctx context.Context, iface string) error {
 	route := net.IP(SearchCidr[:]).String() + "/24"
-	ExecIPCommand(ctx, "link", "route", "del", route) // ignore failures
+	ExecIPCommand(ctx, "route", "del", route) // ignore failures
 	return AddInterfaceRoute(ctx, iface, route)
 }
 
