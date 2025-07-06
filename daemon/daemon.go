@@ -236,7 +236,7 @@ func (d *Daemon) syncIfacePeers(ctx context.Context, peers []string, iface strin
 
 	if !needsSync {
 		d.Log.Info("No peer changes detected, skipping LAN setup")
-		return false, nil
+		return false
 	}
 	d.Log.Info("Peer changes detected, re-syncing LAN setup")
 	return true
