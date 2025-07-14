@@ -134,7 +134,7 @@ func (d *Daemon) init(ctx context.Context) error {
 			return ctx.Err()
 		default:
 		}
-		ip, err := link.FindPrimaryNetworkIP(ctx)
+		ip, _, err := link.FindPrimaryNetworkIP(ctx)
 		if err == nil {
 			d.LocalIP = ip
 			d.Log.Info("Daemon initialized with primary network IP:", d.LocalIP)

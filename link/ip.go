@@ -88,7 +88,7 @@ func SetupDirectInterfaces(ctx context.Context, ifaces []string) error {
 		return fmt.Errorf("no secondary network interfaces found")
 	}
 	log.GetLogger(ctx).Info("Found secondary network interface:", ifaces)
-	primaryIP, err := FindPrimaryNetworkIP(ctx)
+	primaryIP, _, err := FindPrimaryNetworkIP(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to find primary network IP: %w", err)
 	}
@@ -129,7 +129,7 @@ func AssignIPAndCidr(ctx context.Context, iface string, primaryIP string, index 
 	return SetInterfaceUp(ctx, iface)
 }
 
-func FindPrimaryNetworkIP(ctx context.Context) (string, error) {
+func FindPrimaryNetworkIP(ctx context.Context) (string, *net.Interface, error) {
 	log.GetLogger(ctx).Info("Finding primary network IP")
 	prefix := PrimaryLanIpPrefix
 	cfg := config.GetConfig(ctx)
@@ -138,7 +138,7 @@ func FindPrimaryNetworkIP(ctx context.Context) (string, error) {
 		var err error
 		prefix, err = CIDRToPrefix(cfg.Lan.CIDR)
 		if err != nil {
-			return "", fmt.Errorf("failed to convert CIDR to prefix: %w", err)
+			return "", nil, fmt.Errorf("failed to convert CIDR to prefix: %w", err)
 		}
 	}
 	return FindInterfaceIP(ctx, prefix, "")
@@ -170,34 +170,69 @@ func FindSecondaryNetworkIP(ctx context.Context, iface string, index int) (strin
 			return "", fmt.Errorf("failed to convert CIDR to prefix: %w", err)
 		}
 	}
-	return FindInterfaceIP(ctx, prefix, iface)
+	ipstr, _, err := FindInterfaceIP(ctx, prefix, iface)
+	return ipstr, err
 }
 
-func FindInterfaceIP(ctx context.Context, prefix string, iface string) (string, error) {
-	log.GetLogger(ctx).Info("Finding IP for prefix", prefix, "with interface:", iface)
-	args := []string{
-		"addr",
-		"show",
-	}
-	if len(iface) > 0 {
-		args = append(args, iface)
-	}
-	output, err := ExecIPCommand(ctx, args...)
+func FindInterfaceIP(ctx context.Context, prefix string, inter string) (string, *net.Interface, error) {
+	log.GetLogger(ctx).Info("Finding IP for prefix", prefix, "with interface:", inter)
+	ifaces, err := net.Interfaces()
 	if err != nil {
-		return "", err
+		return "", nil, fmt.Errorf("failed to get network interfaces: %w", err)
 	}
-	str := string(output)
-	idx := strings.Index(str, prefix)
-	if idx < 0 {
-		return "", fmt.Errorf("no network IP found")
+	if len(ifaces) == 0 {
+		return "", nil, fmt.Errorf("no network interfaces found")
 	}
-	str = str[idx:]
-	idx = strings.Index(str, "/")
-	if idx < 0 {
-		return "", fmt.Errorf("no network IP found")
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			log.GetLogger(ctx).Info("Error getting addresses for interface:", iface.Name, err)
+			continue
+		}
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				log.GetLogger(ctx).Debugf("Skipping non-IP address for interface %s: %v", iface.Name, addr)
+				continue
+			}
+			if ipNet.IP.To4() == nil {
+				log.GetLogger(ctx).Debugf("Skipping non-IPv4 address for interface %s: %v", iface.Name, ipNet.IP)
+				continue
+			}
+			if strings.HasPrefix(ipNet.IP.String(), prefix) {
+				if inter == "" || iface.Name == inter {
+					log.GetLogger(ctx).Info("Found matching IP for prefix", prefix, "on interface", iface.Name, ":", ipNet.IP.String())
+					return ipNet.IP.String(), &iface, nil
+				}
+				log.GetLogger(ctx).Info("Found matching IP for prefix", prefix, "on interface", iface.Name, ":", ipNet.IP.String())
+			}
+		}
 	}
-	str = str[:idx]
-	return strings.TrimSpace(str), nil
+	log.GetLogger(ctx).Info("No matching IP found for prefix", prefix, "on interface", inter)
+	return "", nil, fmt.Errorf("no matching IP found for prefix %s on interface %s", prefix, inter)
+	// args := []string{
+	// 	"addr",
+	// 	"show",
+	// }
+	// if len(iface) > 0 {
+	// 	args = append(args, iface)
+	// }
+	// output, err := ExecIPCommand(ctx, args...)
+	// if err != nil {
+	// 	return "", err
+	// }
+	// str := string(output)
+	// idx := strings.Index(str, prefix)
+	// if idx < 0 {
+	// 	return "", fmt.Errorf("no network IP found")
+	// }
+	// str = str[idx:]
+	// idx = strings.Index(str, "/")
+	// if idx < 0 {
+	// 	return "", fmt.Errorf("no network IP found")
+	// }
+	// str = str[:idx]
+	// return strings.TrimSpace(str), nil
 }
 
 func FindSecondaryNetworkInterface(ctx context.Context) ([]string, error) {
@@ -243,12 +278,31 @@ func FindPhysicalInterfaces(ctx context.Context) (primary *net.Interface, filter
 		filtered = append(filtered, iface)
 	}
 	if primary == nil {
-		return nil, filtered, fmt.Errorf("no primary network interface found")
+		_, priface, err := FindPrimaryNetworkIP(ctx)
+		if err != nil {
+			return nil, filtered, fmt.Errorf("failed to find primary network IP: %w", err)
+		}
+		if priface == nil {
+			return nil, filtered, fmt.Errorf("no primary network interface found")
+		}
+		primary = priface
+		log.GetLogger(ctx).Info("Using primary network interface:", primary.Name)
 	}
 	return primary, filtered, nil
 }
 
 func IsSecondaryNetworkInterface(ctx context.Context, iface net.Interface) (bool, *net.Interface, error) {
+	prefix := PrimaryLanIpPrefix
+	cfg := config.GetConfig(ctx)
+	if cfg != nil && cfg.Lan.CIDR != "" {
+		log.GetLogger(ctx).Info("Using configured primary network CIDR:", cfg.Lan.CIDR)
+		var err error
+		prefix, err = CIDRToPrefix(cfg.Lan.CIDR)
+		if err != nil {
+			return false, nil, fmt.Errorf("failed to convert CIDR to prefix: %w", err)
+		}
+	}
+
 	if iface.Flags&net.FlagLoopback != 0 {
 		log.GetLogger(ctx).Debug("Skipping loopback interface:", iface.Name)
 		return false, nil, nil
@@ -279,7 +333,16 @@ func IsSecondaryNetworkInterface(ctx context.Context, iface net.Interface) (bool
 		return false, nil, err
 	}
 	for _, addr := range addrs {
-		if strings.HasPrefix(addr.String(), PrimaryLanIpPrefix) {
+		addrIPNet, ok := addr.(*net.IPNet)
+		if !ok {
+			log.GetLogger(ctx).Debugf("Skipping non-IP address for interface %s: %v", iface.Name, addr)
+			continue
+		}
+		if addrIPNet.IP.To4() == nil {
+			log.GetLogger(ctx).Debugf("Skipping non-IPv4 address for interface %s: %v", iface.Name, addrIPNet.IP)
+			continue
+		}
+		if strings.HasPrefix(addrIPNet.IP.String(), prefix) {
 			log.GetLogger(ctx).Info("Found primary network interface:", iface.Name)
 			return false, &iface, nil // This is the primary interface
 		}
