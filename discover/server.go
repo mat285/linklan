@@ -53,20 +53,23 @@ type Server struct {
 
 	knownPeersLock sync.Mutex
 	knownPeers     map[string]struct{} // Track known peers to avoid duplicates
+
+	promMetricsChan chan promMetric
 }
 
 func NewServer(localIP, listenIP string, port int) *Server {
 	return &Server{
-		LocalIP:        localIP,
-		IP:             listenIP,
-		Port:           port,
-		peers:          make(map[[4]byte]net.Conn),
-		knownPeers:     make(map[string]struct{}),
-		peersLock:      sync.Mutex{},
-		knownPeersLock: sync.Mutex{},
-		lock:           sync.Mutex{},
-		cancel:         nil,
-		done:           nil,
+		LocalIP:         localIP,
+		IP:              listenIP,
+		Port:            port,
+		peers:           make(map[[4]byte]net.Conn),
+		knownPeers:      make(map[string]struct{}),
+		peersLock:       sync.Mutex{},
+		knownPeersLock:  sync.Mutex{},
+		lock:            sync.Mutex{},
+		cancel:          nil,
+		done:            nil,
+		promMetricsChan: make(chan promMetric, 100), // Buffered channel for Prometheus metrics
 	}
 }
 
@@ -88,6 +91,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.lock.Unlock()
 
 	go s.SearchForPeers(ctx)
+	go s.writePromMetrics(ctx, s.promMetricsChan)
 	go s.runSpeedTests(ctx)
 	err := s.Listen(ctx)
 	cancel()
@@ -390,6 +394,19 @@ type iperf3Result struct {
 			BitsPerSecond float64 `json:"bits_per_second"`
 		} `json:"sum"`
 	} `json:"intervals"`
+	End struct {
+		SumSent struct {
+			BitsPerSecond float64 `json:"bits_per_second"`
+		} `json:"sum_sent"`
+		SumReceived struct {
+			BitsPerSecond float64 `json:"bits_per_second"`
+		} `json:"sum_received"`
+	} `json:"end"`
+}
+
+func (s *Server) speedTestInterval(ctx context.Context) time.Duration {
+	cfg := config.GetConfig(ctx)
+	return time.Duration(cfg.SpeedTest.IntervalSeconds) * time.Second
 }
 
 func (s *Server) runSpeedTests(ctx context.Context) error {
@@ -399,7 +416,7 @@ func (s *Server) runSpeedTests(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(time.Duration(rand.Intn(10000))*time.Millisecond + time.Duration(cfg.SpeedTest.IntervalSeconds)*time.Second):
+		case <-time.After(time.Duration(rand.Intn(10000))*time.Millisecond + s.speedTestInterval(ctx)):
 
 		}
 
@@ -418,9 +435,12 @@ func (s *Server) runSpeedTests(ctx context.Context) error {
 
 		localIP := strings.Replace(s.LocalIP, "192.168.0.", "192.168.1.", 1)
 
-		self := kubeNodes[localIP]
-		if self == "" {
-			self = localIP
+		self := localIP
+		for host, ip := range kubeNodes {
+			if ip == localIP {
+				self = host
+				break
+			}
 		}
 
 		for _, peerNode := range cfg.SpeedTest.Nodes {
@@ -432,12 +452,12 @@ func (s *Server) runSpeedTests(ctx context.Context) error {
 				log.GetLogger(ctx).Info("Skipping speed test for empty peer name")
 				continue
 			}
-			if peer == s.LocalIP {
-				log.GetLogger(ctx).Info("Skipping speed test for local IP", s.LocalIP)
+			if peer == localIP {
+				log.GetLogger(ctx).Info("Skipping speed test for local IP", localIP)
 				continue
 			}
 			log.GetLogger(ctx).Infof("Running speed test for peer %s", peerNode)
-			if err := s.SpeedTest(ctx, peer, fmt.Sprintf("%s-%s", self, peerNode)); err != nil {
+			if err := s.SpeedTest(ctx, peer, fmt.Sprintf("%s-%s", self, peerNode), self); err != nil {
 				log.GetLogger(ctx).Errorf("Speed test failed for peer %s: %v", peerNode, err)
 			} else {
 				log.GetLogger(ctx).Infof("Speed test completed for peer %s", peerNode)
@@ -451,7 +471,7 @@ func (s *Server) runSpeedTests(ctx context.Context) error {
 	}
 }
 
-func (s *Server) SpeedTest(ctx context.Context, peer string, link string) error {
+func (s *Server) SpeedTest(ctx context.Context, peer string, link string, host string) error {
 	output, err := exec.CommandContext(ctx, "iperf3", "-c", peer, "-n", "2G", "-J", "--connect-timeout", "1000").Output()
 	if err != nil {
 		return fmt.Errorf("failed to run iperf3: %w", err)
@@ -463,12 +483,104 @@ func (s *Server) SpeedTest(ctx context.Context, peer string, link string) error 
 	if len(result.Intervals) == 0 {
 		return fmt.Errorf("no intervals found in iperf3 output")
 	}
-	speed := result.Intervals[len(result.Intervals)-1].Sum.BitsPerSecond
-	log.GetLogger(ctx).Infof("Speed test for peer %s: %0.2f Gbps", peer, speed/1e9)
-	return prom.AppendMetric(MetricName, fmt.Sprintf("%0.2f", speed), time.Now(), map[string]string{
+
+	speed := int64(result.Intervals[len(result.Intervals)-1].Sum.BitsPerSecond)
+
+	log.GetLogger(ctx).Infof("Speed test for peer %s: %0.2f Gbps", peer, float64(speed)/1e9)
+	if speed < 1024*1024*250 {
+		log.GetLogger(ctx).Infof("Dropping outlier low speed test for peer %s: %0.2f Gbps", peer, float64(speed)/1e9)
+		return nil
+	}
+	return prom.AppendMetric(MetricName, fmt.Sprintf("%d", speed), time.Now(), map[string]string{
+		"host": host,
 		"peer": peer,
 		"link": link,
 	})
+}
+
+type promMetric struct {
+	Name  string
+	Value string
+	Tags  map[string]string
+	Time  time.Time
+}
+
+func (s *Server) pushPromMetric(ctx context.Context, name, value string, tags map[string]string) error {
+	if len(name) == 0 || len(value) == 0 {
+		return nil // No metric or value to write
+	}
+	metric := promMetric{
+		Name:  name,
+		Value: value,
+		Tags:  tags,
+		Time:  time.Now(),
+	}
+	log.GetLogger(ctx).Infof("Pushing Prometheus metric: %s = %s with tags %v", metric.Name, metric.Value, metric.Tags)
+	if s.promMetricsChan == nil {
+		prom.AppendMetric(metric.Name, metric.Value, metric.Time, metric.Tags)
+		return fmt.Errorf("prometheus metrics channel is not initialized")
+	}
+	s.promMetricsChan <- metric
+	log.GetLogger(ctx).Infof("Pushed Prometheus metric: %s = %s with tags %v", metric.Name, metric.Value, metric.Tags)
+	return nil
+}
+
+func (s *Server) writePromMetrics(ctx context.Context, work chan promMetric) error {
+	metrics := make(map[string]promMetric)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case metric, ok := <-work:
+			if !ok {
+				log.GetLogger(ctx).Info("Prometheus metrics channel closed, stopping write loop")
+				return nil
+			}
+			name := fmt.Sprintf("%s_%v", metric.Name, metric.Tags)
+			if existing, exists := metrics[name]; exists {
+				if metric.Time.After(existing.Time) {
+					metrics[name] = metric
+				}
+			} else {
+				metrics[name] = metric
+			}
+			prom.AppendMetric(metric.Name, metric.Value, metric.Time, metric.Tags)
+			log.GetLogger(ctx).Infof("Received Prometheus metric: %s = %s with tags %v", metric.Name, metric.Value, metric.Tags)
+
+		case <-time.After(5 * time.Second):
+			if len(metrics) == 0 {
+				log.GetLogger(ctx).Info("No Prometheus metrics to write, skipping")
+				continue
+			}
+
+			for key, metric := range metrics {
+				log.GetLogger(ctx).Infof("Writing Prometheus metric: %s = %s with tags %v", metric.Name, metric.Value, metric.Tags)
+				if metric.Time.Before(time.Now().Add(-s.speedTestInterval(ctx))) {
+					log.GetLogger(ctx).Infof("Skipping old Prometheus metric: %s = %s with tags %v", metric.Name, metric.Value, metric.Tags)
+					delete(metrics, key)
+					continue
+				}
+
+				if err := prom.AppendMetric(metric.Name, metric.Value, metric.Time, metric.Tags); err != nil {
+					log.GetLogger(ctx).Errorf("Failed to write Prometheus metric %s: %v", metric.Name, err)
+					continue
+				}
+				log.GetLogger(ctx).Infof("Wrote Prometheus metric %s with value %s", metric.Name, metric.Value)
+			}
+		}
+	}
+
+	peers := s.ActivePeers(ctx)
+	if len(peers) == 0 {
+		log.GetLogger(ctx).Info("No active peers found, skipping Prometheus metrics update")
+		return nil
+	}
+	for _, peer := range peers {
+		if err := prom.AppendMetric(MetricName, "1", time.Now(), map[string]string{"peer": peer}); err != nil {
+			log.GetLogger(ctx).Errorf("Failed to write Prometheus metric for peer %s: %v", peer, err)
+		}
+	}
+	return nil
 }
 
 func addressToIP(addr string) net.IP {

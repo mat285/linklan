@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/mat285/linklan/link"
 	"github.com/mat285/linklan/log"
 )
 
@@ -93,6 +94,9 @@ func GetKubeNodes(ctx context.Context) (map[string]string, error) {
 	addrs := strings.Split(strings.Trim(string(output), "'"), " ")
 	nodes := make(map[string]string)
 	for i := 0; i < len(addrs); i += 2 {
+		if !strings.HasPrefix(addrs[i], link.PrimaryLanIpPrefix) {
+			continue
+		}
 		nodes[addrs[i+1]] = addrs[i]
 	}
 	return nodes, nil

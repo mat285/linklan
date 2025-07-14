@@ -110,7 +110,7 @@ func (c *Config) SetDefaults() {
 		c.SpeedTest.Bytes = "2G"
 	}
 	if c.SpeedTest.IntervalSeconds == 0 {
-		c.SpeedTest.IntervalSeconds = 60
+		c.SpeedTest.IntervalSeconds = 120
 	}
 }
 
