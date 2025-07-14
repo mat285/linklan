@@ -1,5 +1,13 @@
 package discover
 
+import (
+	"context"
+	"os/exec"
+	"strings"
+
+	"github.com/mat285/linklan/log"
+)
+
 // import (
 // 	"context"
 // 	"os/exec"
@@ -67,3 +75,25 @@ package discover
 // 	log.GetLogger(ctx).Info("Active peers found:", filteredIPs)
 // 	return filteredIPs, nil
 // }
+
+type KubeNode struct {
+	IP   string `json:"ip"`
+	Name string `json:"name"`
+}
+
+func GetKubeNodes(ctx context.Context) (map[string]string, error) {
+	log.GetLogger(ctx).Info("Fetching Kubernetes node IPs...")
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "nodes", "-o", "jsonpath='{.items[*].status.addresses[*].address}'")
+	cmd.Env = append(cmd.Env, "KUBECONFIG=/home/michael/.kube/config")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.GetLogger(ctx).Info("Error executing kubectl command:", string(output))
+		return nil, err
+	}
+	addrs := strings.Split(strings.Trim(string(output), "'"), " ")
+	nodes := make(map[string]string)
+	for i := 0; i < len(addrs); i += 2 {
+		nodes[addrs[i+1]] = addrs[i]
+	}
+	return nodes, nil
+}

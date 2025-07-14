@@ -393,57 +393,62 @@ type iperf3Result struct {
 }
 
 func (s *Server) runSpeedTests(ctx context.Context) error {
+
+	cfg := config.GetConfig(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(time.Duration(rand.Intn(10000)+120000) * time.Millisecond):
+		case <-time.After(time.Duration(rand.Intn(10000))*time.Millisecond + time.Duration(cfg.SpeedTest.IntervalSeconds)*time.Second):
 
 		}
 
-		tested := make(map[[4]byte]struct{})
-		peers := make(map[[4]byte]struct{})
-		s.peersLock.Lock()
-		for ip := range s.peers {
-			peers[ip] = struct{}{}
-		}
-		s.peersLock.Unlock()
-
-		if len(peers) == 0 {
-			log.GetLogger(ctx).Info("No active peers found for speed test")
+		if len(cfg.SpeedTest.Nodes) == 0 {
+			log.GetLogger(ctx).Info("No speed test nodes configured, skipping speed test")
 			continue
 		}
 
-		for peer := range peers {
-			if _, ok := tested[peer]; ok {
+		kubeNodes, err := GetKubeNodes(ctx)
+		if err != nil {
+			log.GetLogger(ctx).Errorf("Failed to get Kubernetes nodes: %v", err)
+			continue
+		}
+
+		self := kubeNodes[s.LocalIP]
+		if self == "" {
+			self = s.LocalIP
+		}
+
+		for _, peerNode := range cfg.SpeedTest.Nodes {
+			peer := peerNode
+			if _, exists := kubeNodes[peer]; !exists {
+				peer = kubeNodes[peer]
+			}
+			if peer == "" {
+				log.GetLogger(ctx).Info("Skipping speed test for empty peer name")
 				continue
 			}
-			peerStr := fmt.Sprintf("%d.%d.%d.%d", peer[0], peer[1], peer[2], peer[3])
-			s.lock.Lock()
-			if _, exists := s.peers[peer]; !exists {
-				s.lock.Unlock()
-				log.GetLogger(ctx).Infof("Peer %s not found in active connections, skipping speed test", peer)
+			if peer == s.LocalIP {
+				log.GetLogger(ctx).Info("Skipping speed test for local IP", s.LocalIP)
 				continue
 			}
-			s.lock.Unlock()
-			tested[peer] = struct{}{}
-			log.GetLogger(ctx).Infof("Running speed test for peer %s", peerStr)
-			if err := s.SpeedTest(ctx, peerStr); err != nil {
-				log.GetLogger(ctx).Errorf("Speed test failed for peer %s: %v", peerStr, err)
+			log.GetLogger(ctx).Infof("Running speed test for peer %s", peerNode)
+			if err := s.SpeedTest(ctx, peer, fmt.Sprintf("%s-%s", self, peerNode)); err != nil {
+				log.GetLogger(ctx).Errorf("Speed test failed for peer %s: %v", peerNode, err)
 			} else {
-				log.GetLogger(ctx).Infof("Speed test completed for peer %s", peerStr)
+				log.GetLogger(ctx).Infof("Speed test completed for peer %s", peerNode)
 			}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(time.Duration(rand.Intn(5000)) * time.Millisecond):
+			case <-time.After(time.Duration(rand.Intn(2000)) * time.Millisecond):
 			}
 		}
 	}
 }
 
-func (s *Server) SpeedTest(ctx context.Context, peer string) error {
-	output, err := exec.CommandContext(ctx, "iperf3", "-c", peer, "-n", "2G", "-J").Output()
+func (s *Server) SpeedTest(ctx context.Context, peer string, link string) error {
+	output, err := exec.CommandContext(ctx, "iperf3", "-c", peer, "-n", "2G", "-J", "--connect-timeout", "1000").Output()
 	if err != nil {
 		return fmt.Errorf("failed to run iperf3: %w", err)
 	}
@@ -455,20 +460,11 @@ func (s *Server) SpeedTest(ctx context.Context, peer string) error {
 		return fmt.Errorf("no intervals found in iperf3 output")
 	}
 	speed := result.Intervals[len(result.Intervals)-1].Sum.BitsPerSecond
-	return prom.AppendMetric(MetricName, fmt.Sprintf("%0.2f", speed/1e6), time.Now(), map[string]string{
+	log.GetLogger(ctx).Infof("Speed test for peer %s: %0.2f Gbps", peer, speed/1e9)
+	return prom.AppendMetric(MetricName, fmt.Sprintf("%0.2f", speed), time.Now(), map[string]string{
 		"peer": peer,
+		"link": link,
 	})
-}
-
-func calculateSpeed(sent int64, start time.Time) (float64, int64) {
-	elapsed := time.Since(start) / time.Nanosecond
-	sent = sent * 8
-	sentMB := sent / (8 * 1024 * 1024)
-	if elapsed == 0 {
-		return 0, sentMB
-	}
-	speed := (float64(sent) / float64(elapsed))
-	return speed, sentMB
 }
 
 func addressToIP(addr string) net.IP {

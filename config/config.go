@@ -23,6 +23,8 @@ type Config struct {
 	Interfaces []IFace `yaml:"interfaces,omitempty" json:"interfaces,omitempty"`
 	Routing    Routing `yaml:"routing,omitempty" json:"routing,omitempty"`
 
+	SpeedTest SpeedTest `yaml:"speedTest,omitempty" json:"speedTest,omitempty"`
+
 	Logger log.Config `yaml:"logger,omitempty" json:"logger,omitempty"`
 }
 
@@ -30,6 +32,12 @@ type Lan struct {
 	CIDR           string   `yaml:"cidr,omitempty" json:"cidr,omitempty"`
 	Iface          string   `yaml:"iface,omitempty" json:"iface,omitempty"`
 	SecondaryCIDRs []string `yaml:"secondaryCidrs,omitempty" json:"secondaryCidrs,omitempty"`
+}
+
+type SpeedTest struct {
+	Nodes           []string `yaml:"nodes,omitempty" json:"nodes,omitempty"`
+	Bytes           string   `yaml:"bytes,omitempty" json:"bytes,omitempty"`
+	IntervalSeconds int      `yaml:"intervalSeconds,omitempty" json:"intervalSeconds,omitempty"`
 }
 
 type IFace struct {
@@ -97,6 +105,12 @@ func (c *Config) String() string {
 func (c *Config) SetDefaults() {
 	if c.Lan.CIDR == "" {
 		c.Lan.CIDR = DefaultPrimaryCIDR
+	}
+	if c.SpeedTest.Bytes == "" {
+		c.SpeedTest.Bytes = "2G"
+	}
+	if c.SpeedTest.IntervalSeconds == 0 {
+		c.SpeedTest.IntervalSeconds = 60
 	}
 }
 
