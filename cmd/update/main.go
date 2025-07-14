@@ -9,16 +9,16 @@ import (
 
 var (
 	machines = []string{
-		// "node0",
-		// "node1",
-		// "node2",
-		// "node3",
-		// "node4",
-		// "node5",
-		// "node6",
-		// "node7",
-		// "worker0",
-		// "worker2",
+		"node0",
+		"node1",
+		"node2",
+		"node3",
+		"node4",
+		"node5",
+		"node6",
+		"node7",
+		"worker0",
+		"worker2",
 		"zstation",
 	}
 )
