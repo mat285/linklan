@@ -414,9 +414,13 @@ func (s *Server) runSpeedTests(ctx context.Context) error {
 			continue
 		}
 
-		self := kubeNodes[s.LocalIP]
+		log.GetLogger(ctx).Info("Kubernetes nodes found:", kubeNodes)
+
+		localIP := strings.Replace(s.LocalIP, "192.168.0.", "192.168.1.", 1)
+
+		self := kubeNodes[localIP]
 		if self == "" {
-			self = s.LocalIP
+			self = localIP
 		}
 
 		for _, peerNode := range cfg.SpeedTest.Nodes {
