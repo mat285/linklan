@@ -491,10 +491,11 @@ func (s *Server) SpeedTest(ctx context.Context, peer string, link string, host s
 		log.GetLogger(ctx).Infof("Dropping outlier low speed test for peer %s: %0.2f Gbps", peer, float64(speed)/1e9)
 		return nil
 	}
-	return prom.AppendMetric(MetricName, fmt.Sprintf("%d", speed), time.Now(), map[string]string{
-		"host": host,
-		"peer": peer,
-		"link": link,
+	return s.pushPromMetric(ctx, MetricName, fmt.Sprintf("%d", speed), map[string]string{
+		"peer":        peer,
+		"link":        link,
+		"source":      host,
+		"destination": peer,
 	})
 }
 
@@ -569,18 +570,6 @@ func (s *Server) writePromMetrics(ctx context.Context, work chan promMetric) err
 			}
 		}
 	}
-
-	peers := s.ActivePeers(ctx)
-	if len(peers) == 0 {
-		log.GetLogger(ctx).Info("No active peers found, skipping Prometheus metrics update")
-		return nil
-	}
-	for _, peer := range peers {
-		if err := prom.AppendMetric(MetricName, "1", time.Now(), map[string]string{"peer": peer}); err != nil {
-			log.GetLogger(ctx).Errorf("Failed to write Prometheus metric for peer %s: %v", peer, err)
-		}
-	}
-	return nil
 }
 
 func addressToIP(addr string) net.IP {
