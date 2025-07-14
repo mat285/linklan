@@ -2,6 +2,7 @@ package discover
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	mrand "math/rand"
 	"net"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/mat285/linklan/config"
 	"github.com/mat285/linklan/link"
 	"github.com/mat285/linklan/log"
+	"github.com/mat285/linklan/prom"
 )
 
 var (
@@ -85,6 +88,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.lock.Unlock()
 
 	go s.SearchForPeers(ctx)
+	go s.runSpeedTests(ctx)
 	err := s.Listen(ctx)
 	cancel()
 	close(done)
@@ -378,6 +382,82 @@ func (s *Server) readConn(ctx context.Context, conn *link.Conn) error {
 			return err
 		}
 	}
+}
+
+type iperf3Result struct {
+	Intervals []struct {
+		Sum struct {
+			BitsPerSecond float64 `json:"bits_per_second"`
+		} `json:"sum"`
+	} `json:"intervals"`
+}
+
+func (s *Server) runSpeedTests(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(rand.Intn(10000)+120000) * time.Millisecond):
+
+		}
+
+		tested := make(map[[4]byte]struct{})
+		peers := make(map[[4]byte]struct{})
+		s.peersLock.Lock()
+		for ip := range s.peers {
+			peers[ip] = struct{}{}
+		}
+		s.peersLock.Unlock()
+
+		if len(peers) == 0 {
+			log.GetLogger(ctx).Info("No active peers found for speed test")
+			continue
+		}
+
+		for peer := range peers {
+			if _, ok := tested[peer]; ok {
+				continue
+			}
+			peerStr := fmt.Sprintf("%d.%d.%d.%d", peer[0], peer[1], peer[2], peer[3])
+			s.lock.Lock()
+			if _, exists := s.peers[peer]; !exists {
+				s.lock.Unlock()
+				log.GetLogger(ctx).Infof("Peer %s not found in active connections, skipping speed test", peer)
+				continue
+			}
+			s.lock.Unlock()
+			tested[peer] = struct{}{}
+			log.GetLogger(ctx).Infof("Running speed test for peer %s", peerStr)
+			if err := s.SpeedTest(ctx, peerStr); err != nil {
+				log.GetLogger(ctx).Errorf("Speed test failed for peer %s: %v", peerStr, err)
+			} else {
+				log.GetLogger(ctx).Infof("Speed test completed for peer %s", peerStr)
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(rand.Intn(5000)) * time.Millisecond):
+			}
+		}
+	}
+}
+
+func (s *Server) SpeedTest(ctx context.Context, peer string) error {
+	output, err := exec.CommandContext(ctx, "iperf3", "-c", peer, "-n", "2G", "-J").Output()
+	if err != nil {
+		return fmt.Errorf("failed to run iperf3: %w", err)
+	}
+	var result iperf3Result
+	if err := json.Unmarshal(output, &result); err != nil {
+		return fmt.Errorf("failed to parse iperf3 output: %w", err)
+	}
+	if len(result.Intervals) == 0 {
+		return fmt.Errorf("no intervals found in iperf3 output")
+	}
+	speed := result.Intervals[len(result.Intervals)-1].Sum.BitsPerSecond
+	return prom.AppendMetric(MetricName, fmt.Sprintf("%0.2f", speed/1e6), time.Now(), map[string]string{
+		"peer": peer,
+	})
 }
 
 func calculateSpeed(sent int64, start time.Time) (float64, int64) {
