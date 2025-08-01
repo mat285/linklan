@@ -13,9 +13,12 @@ const (
 )
 
 func AppendMetric(metric string, value string, ts time.Time, tags map[string]string) error {
+	if true {
+		return nil
+	}
 	// log.GetLogger(ctx).Info("Appending metric:", metric, "with value:", value, "and tags:", tags)
 	if len(metric) == 0 || len(value) == 0 {
-		return nil // No metric or value to write
+		return nil // No metric or value to writecode
 	}
 	str := metric
 	if len(tags) > 0 {

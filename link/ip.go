@@ -272,7 +272,7 @@ func FindPhysicalInterfaces(ctx context.Context) (primary *net.Interface, filter
 			primary = prime
 		}
 		if !valid {
-			log.GetLogger(ctx).Debugf("Skipping interface:", iface.Name)
+			log.GetLogger(ctx).Debugf("Skipping interface: %s", iface.Name)
 			continue
 		}
 		filtered = append(filtered, iface)
@@ -310,6 +310,10 @@ func IsSecondaryNetworkInterface(ctx context.Context, iface net.Interface) (bool
 	if IsFilteredInterface(iface) {
 		log.GetLogger(ctx).Debug("Skipping known virtual interface:", iface.Name)
 		return false, nil, nil
+	}
+
+	if IsBridgeInterface(ctx, iface) {
+		return true, nil, nil
 	}
 	isHardware, err := IsHardwareInterface(iface)
 	if err != nil {
@@ -367,6 +371,15 @@ func IsHardwareInterface(iface net.Interface) (bool, error) {
 	return !strings.Contains(rl, "devices/virtual/"), nil
 }
 
+func IsBridgeInterface(ctx context.Context, iface net.Interface) bool {
+	output, err := ExecIPCommand(context.Background(), "link", "show", iface.Name, "type", "bridge")
+	if err != nil {
+		log.GetLogger(ctx).Debugf("Error checking if interface %s is a bridge: %v", iface.Name, err)
+		return false
+	}
+	return strings.Contains(string(output), iface.Name)
+}
+
 func IsFilteredInterface(iface net.Interface) bool {
 	virtualIfacePrefixes := []string{
 		"lo",
@@ -374,7 +387,6 @@ func IsFilteredInterface(iface net.Interface) bool {
 		"veth",
 		"vxlan",
 		"docker",
-		"br-",
 		"tailscale0",
 		"cali", // calico
 		"w",    // wifi
